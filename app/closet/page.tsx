@@ -1,100 +1,19 @@
 "use client";
 
-import { useState, useEffect, Suspense } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, Save, Check, Trash2, Camera, Flame, Umbrella, Shirt } from 'lucide-react';
+import { Plus, Home, Trash2, Edit, Shirt, X, Flame, Umbrella, Weight, Wind, Layers } from 'lucide-react';
+// ▼ 自作アイコン読み込み（パスが正しいか確認！）
+import { IconDown, IconLong, IconShort, IconLight } from '../../components/ClothIcons';
 
 // ==========================================
-// 1. アイコン部品をここに直接定義（インポート不要！）
+// データ・ヘルパー定義 (Edit/Addと同期させる)
 // ==========================================
 
-const IconDown = ({ size = 24, color = "currentColor", stroke = "white" }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <path d="M4 6C4 4 6 3 8 3H16C18 3 20 4 20 6V20C20 21.1 19.1 22 18 22H6C4.9 22 4 21.1 4 20V6Z" fill={color} stroke={color} strokeWidth="2"/>
-    <path d="M4 10H20" stroke={stroke} strokeWidth="1.5" strokeLinecap="round"/>
-    <path d="M4 15H20" stroke={stroke} strokeWidth="1.5" strokeLinecap="round"/>
-    <path d="M12 3V22" stroke={stroke} strokeWidth="1.5" strokeLinecap="round"/>
-  </svg>
-);
-
-const IconLong = ({ size = 24, color = "currentColor", stroke = "white" }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <path d="M5 5C5 3 7 2 9 2H15C17 2 19 3 19 5V22H5V5Z" fill={color} stroke={color} strokeWidth="2"/>
-    <path d="M9 2L12 8L15 2" stroke={stroke} strokeWidth="1.5" strokeLinejoin="round"/>
-    <path d="M12 8V22" stroke={stroke} strokeWidth="1.5"/>
-  </svg>
-);
-
-const IconShort = ({ size = 24, color = "currentColor", stroke = "white" }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <path d="M4 6C4 4.5 5.5 3 7 3H17C18.5 3 20 4.5 20 6V19C20 20.1 19.1 21 18 21H6C4.9 21 4 20.1 4 19V6Z" fill={color} stroke={color} strokeWidth="2"/>
-    <path d="M12 3V21" stroke={stroke} strokeWidth="1.5"/>
-    <path d="M8 3L12 8L16 3" stroke={stroke} strokeWidth="1.5" strokeLinejoin="round"/>
-    <path d="M4 16H6" stroke={stroke} strokeWidth="1.5"/>
-    <path d="M18 16H20" stroke={stroke} strokeWidth="1.5"/>
-  </svg>
-);
-
-const IconLight = ({ size = 24, color = "currentColor", stroke = "white" }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <path d="M5 6C5 4 7 3 9 3H15C17 3 19 4 19 6V20C19 21.1 18.1 22 17 22H7C5.9 22 5 21.1 5 20V6Z" fill={color} stroke={color} strokeWidth="2"/>
-    <path d="M8 3L12 11L16 3" stroke={stroke} strokeWidth="1.5" strokeLinejoin="round"/>
-    <path d="M12 11V22" stroke={stroke} strokeWidth="1.5"/>
-    <circle cx="14" cy="14" r="1" fill={stroke}/>
-    <circle cx="14" cy="18" r="1" fill={stroke}/>
-  </svg>
-);
-
-// アイコン選択ロジック
-const getCategoryIcon = (id: number, color: string, isSelected: boolean) => {
-  const props = { size: 24, color: isSelected ? color : '#9ca3af', stroke: 'white' };
-  switch (id) {
-    case 1: return <IconDown {...props} />;
-    case 2: case 3: case 4: case 5: return <IconShort {...props} />;
-    case 6: case 7: return <IconLong {...props} />;
-    case 8: return <IconLight {...props} />;
-    default: return <Shirt {...props} />;
-  }
-};
-
-// ==========================================
-// 2. 画像圧縮関数もここに定義
-// ==========================================
-const compressImage = (file: File): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = (event) => {
-      const img = new Image();
-      img.src = event.target?.result as string;
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const MAX_WIDTH = 300;
-        const scaleSize = MAX_WIDTH / img.width;
-        canvas.width = MAX_WIDTH;
-        canvas.height = img.height * scaleSize;
-        const ctx = canvas.getContext('2d');
-        ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
-        resolve(canvas.toDataURL('image/jpeg', 0.7));
-      };
-    };
-    reader.onerror = (error) => reject(error);
-  });
-};
-
-// ==========================================
-// 3. データ定義
-// ==========================================
 const CATEGORIES = [
-  { id: 1, name: '真冬用ダウン', desc: '一番暖かい' },
-  { id: 2, name: '厚手ブルゾン', desc: 'MA-1/ボア' },
-  { id: 3, name: '防風ジャケット', desc: 'レザー/登山' },
-  { id: 4, name: '薄手ブルゾン', desc: 'マンパ/秋春' },
-  { id: 5, name: 'ジャケット', desc: '仕事/きれいめ' },
-  { id: 6, name: '冬用コート', desc: 'ウール/厚手' },
-  { id: 7, name: '春秋コート', desc: 'トレンチ等' },
-  { id: 8, name: 'カーディガン', desc: '室内/重ね着' },
+  { id: 1, name: '真冬用ダウン' }, { id: 2, name: '厚手ブルゾン' }, { id: 3, name: '防風ジャケット' },
+  { id: 4, name: '薄手ブルゾン' }, { id: 5, name: 'ジャケット' }, { id: 6, name: '冬用コート' },
+  { id: 7, name: '春秋コート' }, { id: 8, name: 'カーディガン' },
 ];
 
 const COLORS = [
@@ -106,206 +25,213 @@ const COLORS = [
   { code: '#9f1239', name: 'ワイン' }, { code: '#ec4899', name: 'ピンク' }, { code: '#f59e0b', name: 'イエロー' },
 ];
 
+const renderCategoryIcon = (id: number, color: string) => {
+  const props = { size: 28, color: color, stroke: "white" };
+  switch (id) {
+    case 1: return <IconDown {...props} />;
+    case 2: case 3: case 4: case 5: return <IconShort {...props} />;
+    case 6: case 7: return <IconLong {...props} />;
+    case 8: return <IconLight {...props} />;
+    default: return <Shirt size={28} color={color} />;
+  }
+};
+
+const renderLargeIcon = (id: number, color: string) => {
+  const props = { size: 80, color: color, stroke: "white" };
+  switch (id) {
+    case 1: return <IconDown {...props} />;
+    case 2: case 3: case 4: case 5: return <IconShort {...props} />;
+    case 6: case 7: return <IconLong {...props} />;
+    case 8: return <IconLight {...props} />;
+    default: return <Shirt size={80} color={color} />;
+  }
+};
+
+type Item = {
+  id: string;
+  categoryId: number;
+  name: string;
+  thickness: string;
+  weight: string;
+  windproof: string;
+  color?: string;
+  image?: string;
+  // ★追加
+  warmth?: number;
+  hasHood?: boolean;
+};
+
 // ==========================================
-// 4. コンポーネント本体
+// メインコンポーネント
 // ==========================================
 
-function EditForm() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const itemId = searchParams.get('id');
-  
-  const [loading, setLoading] = useState(true);
-  const [selectedCat, setSelectedCat] = useState<number | null>(null);
-  const [name, setName] = useState('');
-  const [thickness, setThickness] = useState('normal');
-  const [weight, setWeight] = useState('normal');
-  const [windproof, setWindproof] = useState('normal');
-  const [color, setColor] = useState('#000000');
-  const [image, setImage] = useState<string | null>(null);
-  const [warmth, setWarmth] = useState(3);
-  const [hasHood, setHasHood] = useState(false);
+export default function ClosetPage() {
+  // ★初期状態は null に設定。読み込み完了まで待つ
+  const [items, setItems] = useState<Item[] | null>(null); 
+  const [selectedItem, setSelectedItem] = useState<Item | null>(null);
 
+  // 初回ロード時にデータを取得
   useEffect(() => {
-    if (!itemId) return;
-    const savedItems = JSON.parse(localStorage.getItem('my_items') || '[]');
-    const item = savedItems.find((i: any) => i.id === itemId);
-    
-    if (item) {
-      setSelectedCat(item.categoryId);
-      setName(item.name);
-      setThickness(item.thickness);
-      setWeight(item.weight);
-      setWindproof(item.windproof);
-      setColor(item.color || '#000000');
-      setImage(item.image || null);
-      setWarmth(item.warmth || 3);
-      setHasHood(item.hasHood || false);
+    const saved = localStorage.getItem('my_items');
+    if (saved) {
+      setItems(JSON.parse(saved));
     } else {
-      alert('データが見つかりませんでした');
-      router.push('/closet');
+      setItems([]); // データがなければ空配列
     }
-    setLoading(false);
-  }, [itemId, router]);
+  }, []);
 
-  const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      try {
-        const compressed = await compressImage(e.target.files[0]);
-        setImage(compressed);
-      } catch (err) { alert('画像エラー'); }
+  const handleDelete = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    if (!confirm('このアウターを削除しますか？')) return;
+    const newItems = items ? items.filter(item => item.id !== id) : [];
+    setItems(newItems);
+    localStorage.setItem('my_items', JSON.stringify(newItems));
+    // 詳細モーダルが開いていたら閉じる
+    if (selectedItem && selectedItem.id === id) setSelectedItem(null); 
+  };
+
+  const getSpecLabel = (type: string, value: string) => {
+    if (type === 'thickness') {
+      if (value === 'thick') return '厚手';
+      if (value === 'thin') return '薄手';
+      return null;
+    }
+    if (type === 'weight') {
+      if (value === 'heavy') return '重め';
+      if (value === 'light') return '軽量';
+      return null;
+    }
+    if (type === 'windproof') {
+      if (value === 'bad') return '防風';
+      if (value === 'good') return '通気性';
+      return null;
     }
   };
 
-  const handleUpdate = () => {
-    if (!selectedCat) return;
-    const savedItems = JSON.parse(localStorage.getItem('my_items') || '[]');
-    const newItems = savedItems.map((item: any) => {
-      if (item.id === itemId) {
-        return {
-          ...item,
-          categoryId: selectedCat,
-          name: name || CATEGORIES.find(c => c.id === selectedCat)?.name,
-          thickness,
-          weight,
-          windproof,
-          color,
-          image,
-          warmth,
-          hasHood,
-          updatedAt: new Date().toISOString(),
-        };
-      }
-      return item;
-    });
-    localStorage.setItem('my_items', JSON.stringify(newItems));
-    router.push('/closet');
-  };
-
-  const handleDelete = () => {
-    if(!confirm('本当に削除しますか？')) return;
-    const savedItems = JSON.parse(localStorage.getItem('my_items') || '[]');
-    const newItems = savedItems.filter((i: any) => i.id !== itemId);
-    localStorage.setItem('my_items', JSON.stringify(newItems));
-    router.push('/closet');
-  };
-
-  if (loading) return <div className="p-10 text-center">読み込み中...</div>;
+  if (items === null) {
+    // データを読み込んでいる間
+    return <div className="p-10 text-center text-gray-500">読み込み中...</div>;
+  }
 
   return (
-    <main className="min-h-screen bg-gray-50 p-6 pb-24">
+    <main className="min-h-screen bg-gray-50 p-6 pb-24 relative">
+      
       <div className="flex items-center justify-between mb-8">
         <div className="flex items-center gap-4">
-          <Link href="/closet" className="p-2 bg-white rounded-full shadow-sm">
-            <ArrowLeft size={20} className="text-gray-600" />
-          </Link>
-          <h1 className="text-xl font-bold text-gray-800">アウター編集</h1>
+          <Link href="/" className="p-2 bg-white rounded-full shadow-sm text-gray-600"><Home size={20} /></Link>
+          <h1 className="text-xl font-bold text-gray-800">My Closet</h1>
         </div>
-        <button onClick={handleDelete} className="text-red-500 bg-red-50 p-2 rounded-full">
-          <Trash2 size={20} />
-        </button>
+        <span className="text-sm text-gray-500 font-bold">{items.length} 着</span>
       </div>
 
-      <div className="max-w-md mx-auto flex flex-col gap-8">
-        
-        {/* 写真 */}
-        <section className="flex justify-center">
-          <label className="relative w-32 h-32 rounded-2xl border-2 border-dashed border-gray-300 flex flex-col items-center justify-center bg-white cursor-pointer overflow-hidden">
-            {image ? <img src={image} alt="preview" className="w-full h-full object-cover" /> : <div className="text-gray-400 flex flex-col items-center gap-1"><Camera size={24} /><span className="text-[10px]">変更</span></div>}
-            <input type="file" accept="image/*" className="hidden" onChange={handleImageSelect} />
-          </label>
-        </section>
+      {items.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-20 text-gray-400 gap-4">
+          <div className="bg-gray-100 p-6 rounded-full"><Shirt size={40} /></div>
+          <p>まだアウターがありません</p>
+          <p className="text-sm">右下のボタンから登録しよう！</p>
+        </div>
+      ) : (
+        <div className="grid gap-3">
+          {items.map((item) => {
+            const catName = CATEGORIES.find(c => c.id === item.categoryId)?.name || '不明';
+            const colorName = COLORS.find(c => c.code === item.color)?.name || '';
 
-        {/* カテゴリー */}
-        <section>
-          <h2 className="text-sm font-bold text-gray-500 mb-3">種類</h2>
-          <div className="grid grid-cols-2 gap-3">
-            {CATEGORIES.map((cat) => {
-              const isSelected = selectedCat === cat.id;
-              return (
-                <button key={cat.id} onClick={() => setSelectedCat(cat.id)} className={`p-3 rounded-xl flex items-center gap-3 transition-all border-2 text-left ${isSelected ? 'bg-white border-blue-500 shadow-md ring-1 ring-blue-500' : 'bg-white border-transparent shadow-sm hover:bg-gray-50'}`}>
-                  <div className={`p-2 rounded-full ${isSelected ? 'bg-blue-50' : 'bg-gray-100'}`}>{getCategoryIcon(cat.id, color, isSelected)}</div>
-                  <div><span className="block text-sm font-bold text-gray-800">{cat.name}</span><span className="block text-[10px] text-gray-400">{cat.desc}</span></div>
-                </button>
-              );
-            })}
-          </div>
-        </section>
+            return (
+              <div 
+                key={item.id} 
+                onClick={() => setSelectedItem(item)}
+                className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-start justify-between active:scale-95 transition-transform cursor-pointer"
+              >
+                <div className="flex items-start gap-4 w-full">
+                  <div className="w-14 h-14 rounded-lg overflow-hidden border border-gray-200 bg-gray-50 shrink-0 flex items-center justify-center">
+                    {item.image ? (
+                      <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
+                    ) : (
+                      renderCategoryIcon(item.categoryId, item.color || '#333')
+                    )}
+                  </div>
+                  
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 text-[10px] text-gray-400 font-bold mb-1">
+                      <span className="bg-gray-100 px-2 py-0.5 rounded">{catName}</span>
+                      {colorName && <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{background: item.color}}></span>{colorName}</span>}
+                    </div>
+                    <h2 className="font-bold text-gray-800 text-base truncate mb-2">{item.name}</h2>
+                    
+                    <div className="flex flex-wrap gap-1">
+                      {/* ★ 新しいスペックも表示（互換性のために ? をつけておく） */}
+                      {item.warmth && item.warmth >= 4 && <span className="text-[10px] bg-orange-50 text-orange-600 px-2 py-0.5 rounded border border-orange-100 font-medium">激暖Lv.{item.warmth}</span>}
+                      {item.hasHood && <span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded border border-blue-100 font-medium"><Umbrella size={10} className="inline-block mr-1"/>フード</span>}
+                      {getSpecLabel('thickness', item.thickness || 'normal') && <span className="text-[10px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded border border-gray-200 font-medium">{getSpecLabel('thickness', item.thickness || 'normal')}</span>}
+                      {getSpecLabel('weight', item.weight || 'normal') && <span className="text-[10px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded border border-gray-200 font-medium">{getSpecLabel('weight', item.weight || 'normal')}</span>}
+                    </div>
+                  </div>
+                </div>
 
-        {/* 色 */}
-        <section>
-          <h2 className="text-sm font-bold text-gray-500 mb-3">色</h2>
-          <div className="flex flex-wrap gap-3 bg-white p-4 rounded-xl shadow-sm">
-            {COLORS.map((c) => (
-              <button key={c.code} onClick={() => setColor(c.code)} className="w-8 h-8 rounded-full border border-gray-100 flex items-center justify-center transition-transform hover:scale-110" style={{ backgroundColor: c.code }}>
-                {color === c.code && <Check size={14} className={['#ffffff', '#f5f5dc', '#e5e7eb'].includes(c.code) ? 'text-black' : 'text-white'} />}
-              </button>
-            ))}
-          </div>
-        </section>
+                {/* 編集ボタン */}
+                <div className="flex flex-col gap-2 ml-2">
+                  <Link href={`/closet/edit?id=${item.id}`} onClick={(e) => e.stopPropagation()}>
+                    <button className="text-gray-300 hover:text-blue-500 p-2 hover:bg-blue-50 rounded-full transition-colors"><Edit size={18} /></button>
+                  </Link>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
-        {/* スペック */}
-        <section className="bg-white p-6 rounded-2xl shadow-sm space-y-6">
-          <div>
-            <label className="block text-sm font-bold text-gray-500 mb-2">名前</label>
-            <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full p-3 bg-gray-50 rounded-lg border-none bg-gray-100" />
-          </div>
+      {/* 新規登録ボタン */}
+      <Link href="/closet/add">
+        <div className="fixed bottom-6 right-6 bg-blue-600 text-white w-14 h-14 rounded-full shadow-lg flex items-center justify-center hover:bg-blue-700 hover:scale-105 transition-all">
+          <Plus size={28} />
+        </div>
+      </Link>
 
-          {/* 保温レベル */}
-          <div>
-            <div className="flex justify-between items-end mb-2">
-              <label className="text-sm font-bold text-gray-500 flex items-center gap-1"><Flame size={16} className="text-orange-500"/> 保温性 (Warmth)</label>
-              <span className="text-xl font-bold text-orange-500">Lv.{warmth}</span>
-            </div>
-            <input type="range" min="1" max="5" step="1" value={warmth} onChange={(e) => setWarmth(parseInt(e.target.value))} className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-orange-500"/>
-            <div className="flex justify-between text-[10px] text-gray-400 mt-1"><span>薄い</span><span>普通</span><span>超極暖</span></div>
-          </div>
-
-          {/* フード有無 */}
-          <div className="flex items-center justify-between py-2">
-            <label className="text-sm font-bold text-gray-500 flex items-center gap-1"><Umbrella size={16} className="text-blue-500"/> フードはありますか？</label>
-            <button onClick={() => setHasHood(!hasHood)} className={`w-14 h-8 rounded-full transition-colors flex items-center px-1 ${hasHood ? 'bg-blue-500' : 'bg-gray-300'}`}>
-              <div className={`w-6 h-6 bg-white rounded-full shadow transition-transform ${hasHood ? 'translate-x-6' : 'translate-x-0'}`} />
-            </button>
-          </div>
-
-          {/* その他のスペック */}
-          <div className="grid grid-cols-2 gap-4 pt-2 border-t border-gray-100">
-            <div>
-              <label className="block text-xs font-bold text-gray-400 mb-2">重さ</label>
-              <div className="flex bg-gray-100 rounded-lg p-1">
-                {['heavy:重', 'normal:普', 'light:軽'].map(o => {
-                  const [val, label] = o.split(':');
-                  return <button key={val} onClick={() => setWeight(val)} className={`flex-1 py-1 text-xs rounded ${weight === val ? 'bg-white shadow text-gray-800' : 'text-gray-400'}`}>{label}</button>
-                })}
+      {/* 詳細表示モーダル */}
+      {selectedItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6" onClick={() => setSelectedItem(null)}>
+          <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl animate-fade-in relative" onClick={(e) => e.stopPropagation()}>
+            <button onClick={() => setSelectedItem(null)} className="absolute top-4 right-4 p-2 bg-gray-100 rounded-full hover:bg-gray-200"><X size={20} /></button>
+            
+            {/* 詳細情報 */}
+            <div className="flex justify-center mb-6">
+              <div className="w-40 h-40 rounded-2xl overflow-hidden border-4 border-gray-100 bg-gray-50 flex items-center justify-center shadow-inner">
+                {selectedItem.image ? <img src={selectedItem.image} alt={selectedItem.name} className="w-full h-full object-cover" /> : renderLargeIcon(selectedItem.categoryId, selectedItem.color || '#333')}
               </div>
             </div>
-            <div>
-              <label className="block text-xs font-bold text-gray-400 mb-2">風通し</label>
-              <div className="flex bg-gray-100 rounded-lg p-1">
-                {['good:良', 'normal:普', 'bad:防風'].map(o => {
-                  const [val, label] = o.split(':');
-                  return <button key={val} onClick={() => setWindproof(val)} className={`flex-1 py-1 text-xs rounded ${windproof === val ? 'bg-white shadow text-gray-800' : 'text-gray-400'}`}>{label}</button>
-                })}
+            
+            <div className="text-center mb-6">
+              <span className="text-xs font-bold text-gray-400 bg-gray-100 px-3 py-1 rounded-full">{CATEGORIES.find(c => c.id === selectedItem.categoryId)?.name}</span>
+              <h2 className="text-2xl font-bold text-gray-800 mt-2">{selectedItem.name}</h2>
+              {selectedItem.hasHood && <span className="text-xs font-bold text-blue-500 flex items-center justify-center gap-1"><Umbrella size={12}/>フード付き</span>}
+            </div>
+            
+            {/* スペックグリッド */}
+            <div className="grid grid-cols-3 gap-3 mb-6">
+              <div className="bg-gray-50 p-3 rounded-xl flex flex-col items-center">
+                <span className="text-[10px] text-gray-400 mb-1">分厚さ</span>
+                <span className="font-bold text-sm">{selectedItem.thickness === 'thick' ? '厚手' : selectedItem.thickness === 'thin' ? '薄手' : '普通'}</span>
+              </div>
+              <div className="bg-orange-50 p-3 rounded-xl flex flex-col items-center">
+                <span className="text-[10px] text-orange-400 mb-1 font-bold flex items-center gap-1"><Flame size={12}/> 保温性</span>
+                <span className="font-bold text-sm text-orange-600">Lv.{selectedItem.warmth || 3}</span>
+              </div>
+              <div className="bg-gray-50 p-3 rounded-xl flex flex-col items-center">
+                <span className="text-[10px] text-gray-400 mb-1">風通し</span>
+                <span className="font-bold text-sm">{selectedItem.windproof === 'bad' ? '防風' : selectedItem.windproof === 'good' ? '通気性' : '普通'}</span>
               </div>
             </div>
-          </div>
-        </section>
-      </div>
 
-      <div className="fixed bottom-0 left-0 w-full p-4 bg-white border-t border-gray-100">
-        <button onClick={handleUpdate} className="w-full max-w-md mx-auto bg-gray-900 text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2">
-          <Save size={20} /> 更新する
-        </button>
-      </div>
+            <div className="flex gap-3">
+              <Link href={`/closet/edit?id=${selectedItem.id}`} className="flex-1" onClick={(e) => setSelectedItem(null)}>
+                <button className="w-full py-3 bg-gray-900 text-white rounded-xl font-bold flex items-center justify-center gap-2"><Edit size={18} /> 編集</button>
+              </Link>
+              <button onClick={(e) => { e.stopPropagation(); handleDelete(e, selectedItem.id); setSelectedItem(null); }} className="p-3 border-2 border-red-100 text-red-500 rounded-xl hover:bg-red-50"><Trash2 size={20} /></button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </main>
-  );
-}
-
-export default function EditPage() {
-  return (
-    <Suspense fallback={<div>Loading...</div>}>
-      <EditForm />
-    </Suspense>
   );
 }
