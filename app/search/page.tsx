@@ -61,12 +61,9 @@ export default function SearchPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   
-  // 入力ステート
   const [startTime, setStartTime] = useState('09:00');
   const [endTime, setEndTime] = useState('18:00');
   const [transport, setTransport] = useState('train');
-  
-  // ▼▼▼ 旅行モード用のステート ▼▼▼
   const [searchMode, setSearchMode] = useState<'current' | 'travel'>('current');
   const [locationQuery, setLocationQuery] = useState('');
 
@@ -96,14 +93,16 @@ export default function SearchPage() {
           return;
         }
         
-        // Geocoding APIで地名から座標を取得
+        // ▼▼▼ 修正点：ここを書き換えました！(encodeURIComponentを追加) ▼▼▼
         const geoRes = await fetch(
-          `https://geocoding-api.open-meteo.com/v1/search?name=${locationQuery}&count=1&language=ja&format=json`
+          `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(locationQuery)}&count=1&language=ja&format=json`
         );
+        // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+        
         const geoData = await geoRes.json();
 
         if (!geoData.results || geoData.results.length === 0) {
-          alert('場所が見つかりませんでした。「東京」「京都」などで試してください。');
+          alert('場所が見つかりませんでした。「東京」「大阪」などの都市名で試してください。');
           setLoading(false);
           return;
         }
@@ -113,7 +112,7 @@ export default function SearchPage() {
         locationName = geoData.results[0].name;
       }
 
-      // 2. 天気情報の取得（座標を使用）
+      // 2. 天気情報の取得
       const res = await fetch(
         `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=temperature_2m&current_weather=true&timezone=auto`
       );
@@ -140,12 +139,11 @@ export default function SearchPage() {
       const items = JSON.parse(localStorage.getItem('my_items') || '[]');
       const suggestion = getBestOuter(items, minTemp, windSpeed, transport);
       
-      // 結果の保存
       const resultData = {
         suggestion,
         weather: { minTemp, maxTemp, windSpeed },
         chartData,
-        conditions: { startTime, endTime, transport, locationName } // 場所名も保存
+        conditions: { startTime, endTime, transport, locationName }
       };
 
       sessionStorage.setItem('search_result', JSON.stringify(resultData));
@@ -196,17 +194,16 @@ export default function SearchPage() {
             </button>
           </div>
 
-          {/* 旅行モード時の入力フォーム */}
           {searchMode === 'travel' && (
             <div className="animate-fade-in">
               <input 
                 type="text" 
-                placeholder="行き先を入力 (例: 京都、ディズニーランド)"
+                placeholder="行き先を入力 (例: 京都、札幌)"
                 value={locationQuery}
                 onChange={(e) => setLocationQuery(e.target.value)}
                 className="w-full p-4 bg-gray-50 rounded-xl border border-gray-200 focus:ring-2 focus:ring-orange-200 focus:border-orange-400 outline-none transition-all font-bold text-gray-800 placeholder-gray-400"
               />
-              <p className="text-xs text-gray-400 mt-2 ml-1">※県名やランドマーク名を入力してください</p>
+              <p className="text-xs text-gray-400 mt-2 ml-1">※県名や主要な都市名を入力してください</p>
             </div>
           )}
         </div>
@@ -250,7 +247,6 @@ export default function SearchPage() {
           </div>
         </div>
 
-        {/* 検索ボタン */}
         <button 
           onClick={handleSearch}
           disabled={loading}
