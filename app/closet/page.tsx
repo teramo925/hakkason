@@ -1,217 +1,311 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { 
-  Shirt, Search, History, ArrowRight, MapPin, 
-  Cloud, Sun, CloudRain, Snowflake, Loader2, 
-  ArrowUp, ArrowDown, RefreshCw, Droplets 
-} from 'lucide-react';
+import { ArrowLeft, Save, Check, Trash2, Camera, Flame, Umbrella, Shirt } from 'lucide-react';
 
-export default function Home() {
-  const [time, setTime] = useState<string>('');
-  const [date, setDate] = useState<string>('');
-  const [weather, setWeather] = useState<{ temp: number; min: number; max: number; code: number; desc: string; humidity?: number } | null>(null);
-  const [locationName, setLocationName] = useState<string>('---');
-  const [loading, setLoading] = useState(false);
+// ==========================================
+// 1. アイコン部品をここに直接定義（インポート不要！）
+// ==========================================
 
-  // 天気コードを日本語に
-  const getWeatherDesc = (code: number) => {
-    if (code === 0) return '快晴';
-    if (code === 1) return '晴れ';
-    if (code === 2) return '一部曇り';
-    if (code === 3) return '曇り';
-    if (code <= 48) return '霧';
-    if (code <= 67) return '雨';
-    if (code <= 77) return '雪';
-    if (code <= 82) return 'にわか雨';
-    if (code <= 99) return '雷雨';
-    return '-';
-  };
+const IconDown = ({ size = 24, color = "currentColor", stroke = "white" }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path d="M4 6C4 4 6 3 8 3H16C18 3 20 4 20 6V20C20 21.1 19.1 22 18 22H6C4.9 22 4 21.1 4 20V6Z" fill={color} stroke={color} strokeWidth="2"/>
+    <path d="M4 10H20" stroke={stroke} strokeWidth="1.5" strokeLinecap="round"/>
+    <path d="M4 15H20" stroke={stroke} strokeWidth="1.5" strokeLinecap="round"/>
+    <path d="M12 3V22" stroke={stroke} strokeWidth="1.5" strokeLinecap="round"/>
+  </svg>
+);
 
-  // データ取得関数
-  const fetchData = () => {
-    setLoading(true);
-    if (!navigator.geolocation) {
-      setLocationName('位置情報オフ');
-      setLoading(false);
-      return;
-    }
+const IconLong = ({ size = 24, color = "currentColor", stroke = "white" }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path d="M5 5C5 3 7 2 9 2H15C17 2 19 3 19 5V22H5V5Z" fill={color} stroke={color} strokeWidth="2"/>
+    <path d="M9 2L12 8L15 2" stroke={stroke} strokeWidth="1.5" strokeLinejoin="round"/>
+    <path d="M12 8V22" stroke={stroke} strokeWidth="1.5"/>
+  </svg>
+);
 
-    navigator.geolocation.getCurrentPosition(async (pos) => {
-      const { latitude, longitude } = pos.coords;
+const IconShort = ({ size = 24, color = "currentColor", stroke = "white" }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path d="M4 6C4 4.5 5.5 3 7 3H17C18.5 3 20 4.5 20 6V19C20 20.1 19.1 21 18 21H6C4.9 21 4 20.1 4 19V6Z" fill={color} stroke={color} strokeWidth="2"/>
+    <path d="M12 3V21" stroke={stroke} strokeWidth="1.5"/>
+    <path d="M8 3L12 8L16 3" stroke={stroke} strokeWidth="1.5" strokeLinejoin="round"/>
+    <path d="M4 16H6" stroke={stroke} strokeWidth="1.5"/>
+    <path d="M18 16H20" stroke={stroke} strokeWidth="1.5"/>
+  </svg>
+);
 
-      try {
-        // 1. 地名 (OpenStreetMap)
-        const geoRes = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`);
-        const geoData = await geoRes.json();
-        const city = geoData.address.city || geoData.address.ward || geoData.address.town || geoData.address.village || '現在地';
-        setLocationName(city);
+const IconLight = ({ size = 24, color = "currentColor", stroke = "white" }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path d="M5 6C5 4 7 3 9 3H15C17 3 19 4 19 6V20C19 21.1 18.1 22 17 22H7C5.9 22 5 21.1 5 20V6Z" fill={color} stroke={color} strokeWidth="2"/>
+    <path d="M8 3L12 11L16 3" stroke={stroke} strokeWidth="1.5" strokeLinejoin="round"/>
+    <path d="M12 11V22" stroke={stroke} strokeWidth="1.5"/>
+    <circle cx="14" cy="14" r="1" fill={stroke}/>
+    <circle cx="14" cy="18" r="1" fill={stroke}/>
+  </svg>
+);
 
-        // 2. 天気 (Open-Meteo)
-        const weatherRes = await fetch(
-          `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current_weather=true&daily=temperature_2m_max,temperature_2m_min&hourly=relativehumidity_2m&timezone=auto`
-        );
-        const weatherData = await weatherRes.json();
-        
-        // 現在時刻の湿度を取得
-        const currentHour = new Date().getHours();
-        const currentHumidity = weatherData.hourly.relativehumidity_2m[currentHour];
+// アイコン選択ロジック
+const getCategoryIcon = (id: number, color: string, isSelected: boolean) => {
+  const props = { size: 24, color: isSelected ? color : '#9ca3af', stroke: 'white' };
+  switch (id) {
+    case 1: return <IconDown {...props} />;
+    case 2: case 3: case 4: case 5: return <IconShort {...props} />;
+    case 6: case 7: return <IconLong {...props} />;
+    case 8: return <IconLight {...props} />;
+    default: return <Shirt {...props} />;
+  }
+};
 
-        setWeather({
-          temp: weatherData.current_weather.temperature,
-          code: weatherData.current_weather.weathercode,
-          desc: getWeatherDesc(weatherData.current_weather.weathercode),
-          max: weatherData.daily.temperature_2m_max[0],
-          min: weatherData.daily.temperature_2m_min[0],
-          humidity: currentHumidity
-        });
-      } catch (e) {
-        setLocationName('取得エラー');
-      } finally {
-        setLoading(false);
-      }
-    }, () => {
-      setLocationName('位置情報許可待ち');
-      setLoading(false);
-    });
-  };
-
-  // 初回ロード時と時計
-  useEffect(() => {
-    fetchData(); // 初回データ取得
-
-    const updateTime = () => {
-      const now = new Date();
-      setTime(now.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }));
-      setDate(now.toLocaleDateString('ja-JP', { month: 'long', day: 'numeric', weekday: 'short' }));
+// ==========================================
+// 2. 画像圧縮関数もここに定義
+// ==========================================
+const compressImage = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target?.result as string;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_WIDTH = 300;
+        const scaleSize = MAX_WIDTH / img.width;
+        canvas.width = MAX_WIDTH;
+        canvas.height = img.height * scaleSize;
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', 0.7));
+      };
     };
-    updateTime();
-    const timer = setInterval(updateTime, 1000);
-    return () => clearInterval(timer);
-  }, []);
+    reader.onerror = (error) => reject(error);
+  });
+};
 
-  const getWeatherIcon = (code: number) => {
-    if (code <= 1) return <Sun size={60} className="text-orange-500 drop-shadow-md" />;
-    if (code <= 3) return <Cloud size={60} className="text-gray-400 drop-shadow-md" />;
-    if (code <= 67 || (code >= 80 && code <= 99)) return <CloudRain size={60} className="text-blue-500 drop-shadow-md" />;
-    if (code >= 71 && code <= 77) return <Snowflake size={60} className="text-cyan-400 drop-shadow-md" />;
-    return <Cloud size={60} className="text-gray-400" />;
+// ==========================================
+// 3. データ定義
+// ==========================================
+const CATEGORIES = [
+  { id: 1, name: '真冬用ダウン', desc: '一番暖かい' },
+  { id: 2, name: '厚手ブルゾン', desc: 'MA-1/ボア' },
+  { id: 3, name: '防風ジャケット', desc: 'レザー/登山' },
+  { id: 4, name: '薄手ブルゾン', desc: 'マンパ/秋春' },
+  { id: 5, name: 'ジャケット', desc: '仕事/きれいめ' },
+  { id: 6, name: '冬用コート', desc: 'ウール/厚手' },
+  { id: 7, name: '春秋コート', desc: 'トレンチ等' },
+  { id: 8, name: 'カーディガン', desc: '室内/重ね着' },
+];
+
+const COLORS = [
+  { code: '#000000', name: 'ブラック' }, { code: '#374151', name: 'チャコール' }, { code: '#9ca3af', name: 'グレー' },
+  { code: '#e5e7eb', name: 'ライトグレー' }, { code: '#ffffff', name: 'ホワイト' }, { code: '#f5f5dc', name: 'ベージュ' },
+  { code: '#d4b483', name: 'キャメル' }, { code: '#451a03', name: 'ブラウン' }, { code: '#556b2f', name: 'オリーブ' },
+  { code: '#3f6212', name: 'カーキ' }, { code: '#1e3a8a', name: 'ネイビー' }, { code: '#2563eb', name: 'ブルー' },
+  { code: '#60a5fa', name: '水色' }, { code: '#7c3aed', name: 'パープル' }, { code: '#dc2626', name: 'レッド' },
+  { code: '#9f1239', name: 'ワイン' }, { code: '#ec4899', name: 'ピンク' }, { code: '#f59e0b', name: 'イエロー' },
+];
+
+// ==========================================
+// 4. コンポーネント本体
+// ==========================================
+
+function EditForm() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const itemId = searchParams.get('id');
+  
+  const [loading, setLoading] = useState(true);
+  const [selectedCat, setSelectedCat] = useState<number | null>(null);
+  const [name, setName] = useState('');
+  const [thickness, setThickness] = useState('normal');
+  const [weight, setWeight] = useState('normal');
+  const [windproof, setWindproof] = useState('normal');
+  const [color, setColor] = useState('#000000');
+  const [image, setImage] = useState<string | null>(null);
+  const [warmth, setWarmth] = useState(3);
+  const [hasHood, setHasHood] = useState(false);
+
+  useEffect(() => {
+    if (!itemId) return;
+    const savedItems = JSON.parse(localStorage.getItem('my_items') || '[]');
+    const item = savedItems.find((i: any) => i.id === itemId);
+    
+    if (item) {
+      setSelectedCat(item.categoryId);
+      setName(item.name);
+      setThickness(item.thickness);
+      setWeight(item.weight);
+      setWindproof(item.windproof);
+      setColor(item.color || '#000000');
+      setImage(item.image || null);
+      setWarmth(item.warmth || 3);
+      setHasHood(item.hasHood || false);
+    } else {
+      alert('データが見つかりませんでした');
+      router.push('/closet');
+    }
+    setLoading(false);
+  }, [itemId, router]);
+
+  const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      try {
+        const compressed = await compressImage(e.target.files[0]);
+        setImage(compressed);
+      } catch (err) { alert('画像エラー'); }
+    }
   };
+
+  const handleUpdate = () => {
+    if (!selectedCat) return;
+    const savedItems = JSON.parse(localStorage.getItem('my_items') || '[]');
+    const newItems = savedItems.map((item: any) => {
+      if (item.id === itemId) {
+        return {
+          ...item,
+          categoryId: selectedCat,
+          name: name || CATEGORIES.find(c => c.id === selectedCat)?.name,
+          thickness,
+          weight,
+          windproof,
+          color,
+          image,
+          warmth,
+          hasHood,
+          updatedAt: new Date().toISOString(),
+        };
+      }
+      return item;
+    });
+    localStorage.setItem('my_items', JSON.stringify(newItems));
+    router.push('/closet');
+  };
+
+  const handleDelete = () => {
+    if(!confirm('本当に削除しますか？')) return;
+    const savedItems = JSON.parse(localStorage.getItem('my_items') || '[]');
+    const newItems = savedItems.filter((i: any) => i.id !== itemId);
+    localStorage.setItem('my_items', JSON.stringify(newItems));
+    router.push('/closet');
+  };
+
+  if (loading) return <div className="p-10 text-center">読み込み中...</div>;
 
   return (
-    // 背景：ホワイトベースで清潔感のあるデザインに変更
-    <main className="min-h-screen bg-slate-50 text-slate-800 flex flex-col items-center relative p-6 font-sans">
-      
-      {/* ヘッダー：更新ボタン付き */}
-      <header className="w-full max-w-md flex justify-between items-center mb-6 mt-4 z-10">
-        <div>
-          <p className="text-slate-400 text-[10px] font-bold tracking-widest uppercase">Outer Cast</p>
-          <div className="flex items-baseline gap-2">
-            <h1 className="text-4xl font-light tracking-tighter">{time}</h1>
-            <span className="text-sm font-bold text-slate-500">{date}</span>
-          </div>
+    <main className="min-h-screen bg-gray-50 p-6 pb-24">
+      <div className="flex items-center justify-between mb-8">
+        <div className="flex items-center gap-4">
+          <Link href="/closet" className="p-2 bg-white rounded-full shadow-sm">
+            <ArrowLeft size={20} className="text-gray-600" />
+          </Link>
+          <h1 className="text-xl font-bold text-gray-800">アウター編集</h1>
         </div>
-        <button 
-          onClick={fetchData} 
-          className="p-3 bg-white rounded-full shadow-sm border border-slate-100 hover:bg-slate-50 active:scale-95 transition-all text-slate-400"
-        >
-          <RefreshCw size={20} className={loading ? 'animate-spin' : ''} />
+        <button onClick={handleDelete} className="text-red-500 bg-red-50 p-2 rounded-full">
+          <Trash2 size={20} />
         </button>
-      </header>
-
-      {/* メイン天気カード（大きく変更） */}
-      <div className="w-full max-w-md mb-8 z-10">
-        <div className="bg-white rounded-[2rem] p-8 shadow-xl shadow-slate-200/50 border border-white flex flex-col items-center relative overflow-hidden">
-          
-          {/* 背景装飾 */}
-          <div className="absolute top-0 right-0 w-32 h-32 bg-blue-50 rounded-full blur-3xl -mr-10 -mt-10 pointer-events-none"></div>
-          
-          <div className="relative z-10 w-full">
-            <div className="flex justify-between items-start w-full mb-2">
-              <div className="flex items-center gap-2 text-slate-500 bg-slate-100 px-3 py-1 rounded-full w-fit">
-                <MapPin size={14} />
-                <span className="text-xs font-bold truncate max-w-[120px]">{locationName}</span>
-              </div>
-              <span className="text-sm font-bold text-slate-400 bg-slate-50 px-3 py-1 rounded-full">
-                {weather ? weather.desc : '--'}
-              </span>
-            </div>
-
-            <div className="flex items-center justify-between mt-4">
-              <div className="flex flex-col">
-                <div className="flex items-start">
-                  <span className="text-7xl font-bold text-slate-800 tracking-tighter">
-                    {weather ? Math.round(weather.temp) : '--'}
-                  </span>
-                  <span className="text-2xl text-slate-400 mt-2 ml-1">°</span>
-                </div>
-                {/* 最高・最低気温 */}
-                {weather && (
-                  <div className="flex gap-4 text-sm font-bold mt-2">
-                    <span className="text-red-400 flex items-center gap-1"><ArrowUp size={14}/>{Math.round(weather.max)}°</span>
-                    <span className="text-blue-400 flex items-center gap-1"><ArrowDown size={14}/>{Math.round(weather.min)}°</span>
-                  </div>
-                )}
-              </div>
-              
-              {/* アイコン表示エリア */}
-              <div className="flex flex-col items-center gap-2">
-                {loading ? <Loader2 className="animate-spin text-slate-300" size={40} /> : weather && getWeatherIcon(weather.code)}
-                {weather?.humidity && (
-                  <div className="flex items-center gap-1 text-xs text-blue-400 font-bold bg-blue-50 px-2 py-1 rounded-md">
-                    <Droplets size={12} /> {weather.humidity}%
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
       </div>
 
-      {/* メニューエリア */}
-      <div className="w-full max-w-md flex flex-col gap-4 z-10 pb-10 flex-1">
+      <div className="max-w-md mx-auto flex flex-col gap-8">
         
-        {/* ① 提案機能 */}
-        <Link href="/search" className="group w-full">
-          <div className="bg-slate-900 text-white rounded-3xl p-6 shadow-xl flex items-center justify-between transition-transform active:scale-95">
-            <div className="flex items-center gap-4">
-              <div className="bg-white/10 p-4 rounded-2xl">
-                <Search size={28} />
-              </div>
-              <div>
-                <h2 className="text-xl font-bold">Coordinate</h2>
-                <p className="text-slate-400 text-xs">今日の最適アウターを探す</p>
+        {/* 写真 */}
+        <section className="flex justify-center">
+          <label className="relative w-32 h-32 rounded-2xl border-2 border-dashed border-gray-300 flex flex-col items-center justify-center bg-white cursor-pointer overflow-hidden">
+            {image ? <img src={image} alt="preview" className="w-full h-full object-cover" /> : <div className="text-gray-400 flex flex-col items-center gap-1"><Camera size={24} /><span className="text-[10px]">変更</span></div>}
+            <input type="file" accept="image/*" className="hidden" onChange={handleImageSelect} />
+          </label>
+        </section>
+
+        {/* カテゴリー */}
+        <section>
+          <h2 className="text-sm font-bold text-gray-500 mb-3">種類</h2>
+          <div className="grid grid-cols-2 gap-3">
+            {CATEGORIES.map((cat) => {
+              const isSelected = selectedCat === cat.id;
+              return (
+                <button key={cat.id} onClick={() => setSelectedCat(cat.id)} className={`p-3 rounded-xl flex items-center gap-3 transition-all border-2 text-left ${isSelected ? 'bg-white border-blue-500 shadow-md ring-1 ring-blue-500' : 'bg-white border-transparent shadow-sm hover:bg-gray-50'}`}>
+                  <div className={`p-2 rounded-full ${isSelected ? 'bg-blue-50' : 'bg-gray-100'}`}>{getCategoryIcon(cat.id, color, isSelected)}</div>
+                  <div><span className="block text-sm font-bold text-gray-800">{cat.name}</span><span className="block text-[10px] text-gray-400">{cat.desc}</span></div>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        {/* 色 */}
+        <section>
+          <h2 className="text-sm font-bold text-gray-500 mb-3">色</h2>
+          <div className="flex flex-wrap gap-3 bg-white p-4 rounded-xl shadow-sm">
+            {COLORS.map((c) => (
+              <button key={c.code} onClick={() => setColor(c.code)} className="w-8 h-8 rounded-full border border-gray-100 flex items-center justify-center transition-transform hover:scale-110" style={{ backgroundColor: c.code }}>
+                {color === c.code && <Check size={14} className={['#ffffff', '#f5f5dc', '#e5e7eb'].includes(c.code) ? 'text-black' : 'text-white'} />}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        {/* スペック */}
+        <section className="bg-white p-6 rounded-2xl shadow-sm space-y-6">
+          <div>
+            <label className="block text-sm font-bold text-gray-500 mb-2">名前</label>
+            <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full p-3 bg-gray-50 rounded-lg border-none bg-gray-100" />
+          </div>
+
+          {/* 保温レベル */}
+          <div>
+            <div className="flex justify-between items-end mb-2">
+              <label className="text-sm font-bold text-gray-500 flex items-center gap-1"><Flame size={16} className="text-orange-500"/> 保温性 (Warmth)</label>
+              <span className="text-xl font-bold text-orange-500">Lv.{warmth}</span>
+            </div>
+            <input type="range" min="1" max="5" step="1" value={warmth} onChange={(e) => setWarmth(parseInt(e.target.value))} className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-orange-500"/>
+            <div className="flex justify-between text-[10px] text-gray-400 mt-1"><span>薄い</span><span>普通</span><span>超極暖</span></div>
+          </div>
+
+          {/* フード有無 */}
+          <div className="flex items-center justify-between py-2">
+            <label className="text-sm font-bold text-gray-500 flex items-center gap-1"><Umbrella size={16} className="text-blue-500"/> フードはありますか？</label>
+            <button onClick={() => setHasHood(!hasHood)} className={`w-14 h-8 rounded-full transition-colors flex items-center px-1 ${hasHood ? 'bg-blue-500' : 'bg-gray-300'}`}>
+              <div className={`w-6 h-6 bg-white rounded-full shadow transition-transform ${hasHood ? 'translate-x-6' : 'translate-x-0'}`} />
+            </button>
+          </div>
+
+          {/* その他のスペック */}
+          <div className="grid grid-cols-2 gap-4 pt-2 border-t border-gray-100">
+            <div>
+              <label className="block text-xs font-bold text-gray-400 mb-2">重さ</label>
+              <div className="flex bg-gray-100 rounded-lg p-1">
+                {['heavy:重', 'normal:普', 'light:軽'].map(o => {
+                  const [val, label] = o.split(':');
+                  return <button key={val} onClick={() => setWeight(val)} className={`flex-1 py-1 text-xs rounded ${weight === val ? 'bg-white shadow text-gray-800' : 'text-gray-400'}`}>{label}</button>
+                })}
               </div>
             </div>
-            <div className="bg-white text-slate-900 p-3 rounded-full">
-              <ArrowRight size={20} />
+            <div>
+              <label className="block text-xs font-bold text-gray-400 mb-2">風通し</label>
+              <div className="flex bg-gray-100 rounded-lg p-1">
+                {['good:良', 'normal:普', 'bad:防風'].map(o => {
+                  const [val, label] = o.split(':');
+                  return <button key={val} onClick={() => setWindproof(val)} className={`flex-1 py-1 text-xs rounded ${windproof === val ? 'bg-white shadow text-gray-800' : 'text-gray-400'}`}>{label}</button>
+                })}
+              </div>
             </div>
           </div>
-        </Link>
+        </section>
+      </div>
 
-        <div className="grid grid-cols-2 gap-4">
-          {/* ② 登録機能 */}
-          <Link href="/closet" className="group w-full">
-            <div className="bg-white rounded-3xl p-6 shadow-lg border border-slate-100 flex flex-col justify-between h-32 active:scale-95 transition-transform">
-              <div className="text-orange-500 bg-orange-50 w-fit p-3 rounded-xl">
-                <Shirt size={24} />
-              </div>
-              <span className="font-bold text-slate-700">My Closet</span>
-            </div>
-          </Link>
-
-          {/* ③ 履歴機能 */}
-          <Link href="/history" className="group w-full">
-            <div className="bg-white rounded-3xl p-6 shadow-lg border border-slate-100 flex flex-col justify-between h-32 active:scale-95 transition-transform">
-              <div className="text-blue-500 bg-blue-50 w-fit p-3 rounded-xl">
-                <History size={24} />
-              </div>
-              <span className="font-bold text-slate-700">History</span>
-            </div>
-          </Link>
-        </div>
+      <div className="fixed bottom-0 left-0 w-full p-4 bg-white border-t border-gray-100">
+        <button onClick={handleUpdate} className="w-full max-w-md mx-auto bg-gray-900 text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2">
+          <Save size={20} /> 更新する
+        </button>
       </div>
     </main>
+  );
+}
+
+export default function EditPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <EditForm />
+    </Suspense>
   );
 }
