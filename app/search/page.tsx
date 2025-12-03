@@ -10,7 +10,7 @@ import AnalogClockSlider from '../../components/AnalogClockSlider';
 // データ・ロジック定義
 // ==========================================
 
-// カテゴリーごとの基準気温と名前
+// カテゴリーごとの基準気温と名前（推奨用マスタデータ）
 const CATEGORY_DATA: Record<number, { temp: number; name: string }> = {
   1: { temp: 3, name: '真冬用ダウン' },
   2: { temp: 7, name: '厚手ブルゾン' },
@@ -39,14 +39,18 @@ function getBestOuter(items: Item[], minTemp: number, windSpeed: number, transpo
   let maxScore = -9999;
 
   items.forEach((item) => {
+    // マスタデータから基準気温を取得（なければ15℃）
     const catData = CATEGORY_DATA[item.categoryId];
     let target = catData ? catData.temp : 15;
     
+    // スペック補正
     if (item.thickness === 'thick') target -= 3;
     if (item.thickness === 'thin') target += 5;
 
+    // 基本スコア計算
     let score = 100 - Math.abs(target - minTemp) * 5;
 
+    // 状況補正
     if (windSpeed >= 5 && item.windproof === 'bad') score += 15;
     if (windSpeed >= 5 && item.windproof === 'good') score -= 10;
 
@@ -118,6 +122,7 @@ export default function SearchPage() {
           return;
         }
         
+        // 日本語対応のためのエンコード処理
         const geoRes = await fetch(
           `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(locationQuery)}&count=1&language=ja&format=json`
         );
@@ -155,17 +160,18 @@ export default function SearchPage() {
       const maxTemp = Math.max(...targetTemps);
       const windSpeed = data.current_weather.windspeed;
 
-      // ▼▼▼ 修正点：手持ちがない場合でも提案を作る ▼▼▼
+      // ▼▼▼ 修正点：手持ちがない or 合わない場合のロジック ▼▼▼
       const items = JSON.parse(localStorage.getItem('my_items') || '[]');
-      let suggestion;
+      let suggestion = null;
 
+      // まず手持ちから探す
       if (items.length > 0) {
-        // A. 手持ちがある場合：いつものロジック
         suggestion = getBestOuter(items, minTemp, windSpeed, transport);
       } 
       
-      // B. 手持ちがない（またはマッチしなかった）場合：理想のアウターを提案
-      if (!suggestion) {
+      // 「手持ちがない」または「ベストな服でも点数が低い（50点未満）」場合
+      // → AIが理想の服を提案する（手持ちの結果を上書き）
+      if (!suggestion || suggestion.score < 50) {
         const idealId = getIdealCategory(minTemp);
         const idealName = CATEGORY_DATA[idealId].name;
         
@@ -173,15 +179,16 @@ export default function SearchPage() {
         suggestion = {
           item: {
             id: 'dummy',
-            name: `推奨: ${idealName}`, // 「推奨: ダウン」のように表示
+            name: `推奨: ${idealName}`, // 「推奨: 真冬用ダウン」のように表示
             categoryId: idealId,
             thickness: 'normal',
             weight: 'normal',
             windproof: 'normal',
             color: '#cccccc', // グレーで表示
+            image: null,
             isRecommendation: true // ※これは「持っていない」印として使えます
           },
-          score: 100
+          score: 100 // 推奨なので満点扱い
         };
       }
       // ▲▲▲ ここまで ▲▲▲
