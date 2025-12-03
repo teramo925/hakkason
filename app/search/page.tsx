@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, MapPin, Search, Clock, Car, Train, Footprints } from 'lucide-react';
+import { ArrowLeft, MapPin, Search, Clock, Car, Train, Footprints, Plane } from 'lucide-react';
 import AnalogClockSlider from '../../components/AnalogClockSlider';
 
 // ==========================================
@@ -60,68 +60,102 @@ function getBestOuter(items: Item[], minTemp: number, windSpeed: number, transpo
 export default function SearchPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  
+  // 入力ステート
   const [startTime, setStartTime] = useState('09:00');
   const [endTime, setEndTime] = useState('18:00');
   const [transport, setTransport] = useState('train');
+  
+  // ▼▼▼ 旅行モード用のステート ▼▼▼
+  const [searchMode, setSearchMode] = useState<'current' | 'travel'>('current');
+  const [locationQuery, setLocationQuery] = useState('');
 
-  const handleSearch = () => {
+  const handleSearch = async () => {
     setLoading(true);
 
-    navigator.geolocation.getCurrentPosition(async (position) => {
-      const { latitude, longitude } = position.coords;
+    try {
+      let lat: number;
+      let lon: number;
+      let locationName: string;
 
-      try {
-        const res = await fetch(
-          `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&hourly=temperature_2m&current_weather=true&timezone=auto`
+      // 1. 位置情報の取得（モード分岐）
+      if (searchMode === 'current') {
+        // A. 現在地モード
+        const position: any = await new Promise((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject);
+        });
+        lat = position.coords.latitude;
+        lon = position.coords.longitude;
+        locationName = "現在地";
+      
+      } else {
+        // B. 旅行モード（地名検索）
+        if (!locationQuery) {
+          alert('行き先を入力してください');
+          setLoading(false);
+          return;
+        }
+        
+        // Geocoding APIで地名から座標を取得
+        const geoRes = await fetch(
+          `https://geocoding-api.open-meteo.com/v1/search?name=${locationQuery}&count=1&language=ja&format=json`
         );
-        const data = await res.json();
+        const geoData = await geoRes.json();
 
-        // 時間帯の抽出ロジック
-        const startHour = parseInt(startTime.split(':')[0]); 
-        const endHour = parseInt(endTime.split(':')[0]);
-        const safeEndHour = endHour >= startHour ? endHour : 23;
+        if (!geoData.results || geoData.results.length === 0) {
+          alert('場所が見つかりませんでした。「東京」「京都」などで試してください。');
+          setLoading(false);
+          return;
+        }
 
-        // 指定時間帯の気温配列を作成（グラフ用）
-        const hourlyTemps = data.hourly.temperature_2m.slice(0, 24);
-        const targetTemps = hourlyTemps.slice(startHour, safeEndHour + 1);
-        
-        // グラフ描画用に「時間」と「気温」のペアデータを作る
-        const chartData = targetTemps.map((temp: number, index: number) => ({
-          hour: startHour + index,
-          temp: temp
-        }));
-
-        const minTemp = Math.min(...targetTemps);
-        const maxTemp = Math.max(...targetTemps);
-        const windSpeed = data.current_weather.windspeed;
-
-        // ベストアイテム算出
-        const items = JSON.parse(localStorage.getItem('my_items') || '[]');
-        const suggestion = getBestOuter(items, minTemp, windSpeed, transport);
-        
-        // ▼▼ 変更点：結果を保存してページ移動 ▼▼
-        const resultData = {
-          suggestion,
-          weather: { minTemp, maxTemp, windSpeed },
-          chartData, // グラフ用データ
-          conditions: { startTime, endTime, transport }
-        };
-
-        // 一時保存 (Session Storage)
-        sessionStorage.setItem('search_result', JSON.stringify(resultData));
-        
-        // 結果ページへ移動
-        router.push('/result');
-
-      } catch (error) {
-        console.error(error);
-        alert('エラーが発生しました');
-        setLoading(false);
+        lat = geoData.results[0].latitude;
+        lon = geoData.results[0].longitude;
+        locationName = geoData.results[0].name;
       }
-    }, () => {
-      alert('位置情報が必要です');
+
+      // 2. 天気情報の取得（座標を使用）
+      const res = await fetch(
+        `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=temperature_2m&current_weather=true&timezone=auto`
+      );
+      const data = await res.json();
+
+      // 3. 時間帯データの抽出
+      const startHour = parseInt(startTime.split(':')[0]); 
+      const endHour = parseInt(endTime.split(':')[0]);
+      const safeEndHour = endHour >= startHour ? endHour : 23;
+
+      const hourlyTemps = data.hourly.temperature_2m.slice(0, 24);
+      const targetTemps = hourlyTemps.slice(startHour, safeEndHour + 1);
+      
+      const chartData = targetTemps.map((temp: number, index: number) => ({
+        hour: startHour + index,
+        temp: temp
+      }));
+
+      const minTemp = Math.min(...targetTemps);
+      const maxTemp = Math.max(...targetTemps);
+      const windSpeed = data.current_weather.windspeed;
+
+      // 4. ベストアウター判定
+      const items = JSON.parse(localStorage.getItem('my_items') || '[]');
+      const suggestion = getBestOuter(items, minTemp, windSpeed, transport);
+      
+      // 結果の保存
+      const resultData = {
+        suggestion,
+        weather: { minTemp, maxTemp, windSpeed },
+        chartData,
+        conditions: { startTime, endTime, transport, locationName } // 場所名も保存
+      };
+
+      sessionStorage.setItem('search_result', JSON.stringify(resultData));
+      router.push('/result');
+
+    } catch (error) {
+      console.error(error);
+      alert('エラーが発生しました。通信環境を確認してください。');
       setLoading(false);
-    });
+    }
   };
 
   return (
@@ -135,19 +169,46 @@ export default function SearchPage() {
 
       <div className="max-w-md mx-auto space-y-8 bg-white p-6 rounded-2xl shadow-sm">
           
-        {/* 場所 */}
+        {/* 場所選択（モード切替） */}
         <div>
-          <label className="block text-sm font-bold text-gray-500 mb-2 flex items-center gap-2">
-            <MapPin size={16} /> 場所
+          <label className="block text-sm font-bold text-gray-500 mb-3 flex items-center gap-2">
+            <MapPin size={16} /> 場所・行き先
           </label>
-          <div className="flex gap-2">
-            <button className="flex-1 py-3 bg-blue-50 text-blue-700 font-bold rounded-lg border-2 border-blue-200 flex items-center justify-center gap-2">
-              現在地
+          
+          <div className="flex gap-2 mb-4">
+            <button 
+              onClick={() => setSearchMode('current')}
+              className={`flex-1 py-3 font-bold rounded-lg border-2 flex items-center justify-center gap-2 transition-all
+                ${searchMode === 'current' 
+                  ? 'bg-blue-50 border-blue-200 text-blue-700' 
+                  : 'bg-white border-gray-100 text-gray-400'}`}
+            >
+              <MapPin size={18} /> 現在地
             </button>
-            <button className="flex-1 py-3 bg-gray-50 text-gray-400 font-bold rounded-lg" disabled>
-              旅行 (未)
+            <button 
+              onClick={() => setSearchMode('travel')}
+              className={`flex-1 py-3 font-bold rounded-lg border-2 flex items-center justify-center gap-2 transition-all
+                ${searchMode === 'travel' 
+                  ? 'bg-orange-50 border-orange-200 text-orange-700' 
+                  : 'bg-white border-gray-100 text-gray-400'}`}
+            >
+              <Plane size={18} /> 旅行・遠出
             </button>
           </div>
+
+          {/* 旅行モード時の入力フォーム */}
+          {searchMode === 'travel' && (
+            <div className="animate-fade-in">
+              <input 
+                type="text" 
+                placeholder="行き先を入力 (例: 京都、ディズニーランド)"
+                value={locationQuery}
+                onChange={(e) => setLocationQuery(e.target.value)}
+                className="w-full p-4 bg-gray-50 rounded-xl border border-gray-200 focus:ring-2 focus:ring-orange-200 focus:border-orange-400 outline-none transition-all font-bold text-gray-800 placeholder-gray-400"
+              />
+              <p className="text-xs text-gray-400 mt-2 ml-1">※県名やランドマーク名を入力してください</p>
+            </div>
+          )}
         </div>
 
         {/* 時間 */}
@@ -189,14 +250,17 @@ export default function SearchPage() {
           </div>
         </div>
 
+        {/* 検索ボタン */}
         <button 
           onClick={handleSearch}
           disabled={loading}
-          className="w-full bg-blue-600 text-white font-bold py-4 rounded-xl shadow-lg hover:bg-blue-700 transition-all flex items-center justify-center gap-2 disabled:bg-gray-400"
+          className={`w-full text-white font-bold py-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 disabled:bg-gray-400 transform active:scale-95
+            ${searchMode === 'travel' ? 'bg-orange-500 hover:bg-orange-600' : 'bg-blue-600 hover:bg-blue-700'}`}
         >
           {loading ? '計算中...' : (
             <>
-              <Search size={20} /> コーディネートを検索
+              <Search size={20} /> 
+              {searchMode === 'travel' ? '現地のコーデを検索' : 'コーディネートを検索'}
             </>
           )}
         </button>
