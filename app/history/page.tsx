@@ -6,7 +6,7 @@ import { ArrowLeft, ChevronLeft, ChevronRight, Calendar, Smile, Frown, Meh, X, T
 
 type Log = {
   id: string;
-  date: string; // "YYYY/MM/DD" or locale string
+  date: string;
   timestamp?: number;
   itemName: string;
   itemColor?: string;
@@ -19,10 +19,9 @@ type Log = {
 
 export default function HistoryPage() {
   const [logs, setLogs] = useState<Log[]>([]);
-  const [currentDate, setCurrentDate] = useState(new Date()); // 表示中の年月
-  const [selectedLog, setSelectedLog] = useState<Log | null>(null); // 詳細表示中のログ
+  const [currentDate, setCurrentDate] = useState(new Date());
+  const [selectedLog, setSelectedLog] = useState<Log | null>(null);
 
-  // データ読み込み
   useEffect(() => {
     const saved = localStorage.getItem('my_logs');
     if (saved) {
@@ -30,7 +29,6 @@ export default function HistoryPage() {
     }
   }, []);
 
-  // 評価更新処理
   const handleRate = (id: string, rating: 'good' | 'ok' | 'bad') => {
     const newLogs = logs.map(log => 
       log.id === id ? { ...log, rating } : log
@@ -38,44 +36,80 @@ export default function HistoryPage() {
     setLogs(newLogs);
     localStorage.setItem('my_logs', JSON.stringify(newLogs));
     
-    // 選択中のログも更新して表示を反映
     if (selectedLog && selectedLog.id === id) {
       setSelectedLog({ ...selectedLog, rating });
     }
   };
 
-  // --- カレンダー生成ロジック ---
+  // --- カレンダーロジック ---
   const year = currentDate.getFullYear();
-  const month = currentDate.getMonth(); // 0-11
-  
-  // 月の初日と末日
+  const month = currentDate.getMonth();
   const firstDay = new Date(year, month, 1);
   const lastDay = new Date(year, month + 1, 0);
   
-  // カレンダーの日付配列を作る
   const calendarDays = [];
-  // 月初の空白埋め
-  for (let i = 0; i < firstDay.getDay(); i++) {
-    calendarDays.push(null);
-  }
-  // 日付埋め
-  for (let i = 1; i <= lastDay.getDate(); i++) {
-    calendarDays.push(new Date(year, month, i));
-  }
+  for (let i = 0; i < firstDay.getDay(); i++) calendarDays.push(null);
+  for (let i = 1; i <= lastDay.getDate(); i++) calendarDays.push(new Date(year, month, i));
 
-  // 前月・次月移動
   const prevMonth = () => setCurrentDate(new Date(year, month - 1, 1));
   const nextMonth = () => setCurrentDate(new Date(year, month + 1, 1));
 
-  // 指定した日付のログを探す
   const getLogForDate = (date: Date) => {
     return logs.find(log => {
-      // 日付文字列の形式が環境によって違う可能性があるため、簡易的に比較
       const logDate = new Date(log.timestamp || log.date);
       return logDate.getDate() === date.getDate() &&
              logDate.getMonth() === date.getMonth() &&
              logDate.getFullYear() === date.getFullYear();
     });
+  };
+
+  // --- グラフ描画用ヘルパー関数 ---
+  const renderGraph = (chartData: any[], minTemp: number, maxTemp: number) => {
+    const STEP_X = 50; 
+    const GRAPH_HEIGHT = 100;
+    const PADDING_Y = 20;
+    const width = chartData.length * STEP_X + 40;
+
+    const range = maxTemp - minTemp || 1;
+    const getX = (i: number) => i * STEP_X + 20;
+    const getY = (temp: number) => {
+      const ratio = (temp - minTemp) / range;
+      return (GRAPH_HEIGHT - PADDING_Y) - (ratio * (GRAPH_HEIGHT - PADDING_Y * 2));
+    };
+
+    const linePoints = chartData.map((d: any, i: number) => `${getX(i)},${getY(d.temp)}`).join(' ');
+    const areaPoints = `${getX(0)},${GRAPH_HEIGHT} ${linePoints} ${getX(chartData.length - 1)},${GRAPH_HEIGHT}`;
+
+    return (
+      <div className="overflow-x-auto pb-2 custom-scrollbar">
+        <div style={{ width: `${width}px`, height: `${GRAPH_HEIGHT}px` }} className="relative">
+          <svg width="100%" height="100%">
+            <defs>
+              <linearGradient id="histGradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.2" />
+                <stop offset="100%" stopColor="#3b82f6" stopOpacity="0" />
+              </linearGradient>
+            </defs>
+            <polygon points={areaPoints} fill="url(#histGradient)" />
+            <polyline points={linePoints} fill="none" stroke="#3b82f6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            {chartData.map((d: any, i: number) => {
+              const x = getX(i);
+              const y = getY(d.temp);
+              const isMin = d.temp === minTemp;
+              const isMax = d.temp === maxTemp;
+              return (
+                <g key={i}>
+                  <line x1={x} y1={y} x2={x} y2={GRAPH_HEIGHT} stroke="#f1f5f9" strokeDasharray="4 4" />
+                  <circle cx={x} cy={y} r={isMin || isMax ? 4 : 3} fill={isMin ? "#3b82f6" : isMax ? "#ef4444" : "white"} stroke={isMax ? "#ef4444" : "#3b82f6"} strokeWidth="2" />
+                  <text x={x} y={y - 8} textAnchor="middle" className={`text-[10px] font-bold ${isMax ? 'fill-red-500' : 'fill-gray-600'}`}>{d.temp}</text>
+                  <text x={x} y={GRAPH_HEIGHT - 2} textAnchor="middle" className="text-[10px] fill-gray-400">{d.hour}</text>
+                </g>
+              );
+            })}
+          </svg>
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -91,7 +125,7 @@ export default function HistoryPage() {
         </div>
       </div>
 
-      {/* カレンダー操作バー */}
+      {/* カレンダー操作 */}
       <div className="bg-white rounded-t-2xl p-4 flex items-center justify-between border-b border-gray-100 shadow-sm">
         <button onClick={prevMonth} className="p-2 hover:bg-gray-100 rounded-full">
           <ChevronLeft size={24} className="text-gray-600" />
@@ -104,9 +138,8 @@ export default function HistoryPage() {
         </button>
       </div>
 
-      {/* カレンダー本体 */}
+      {/* カレンダーグリッド */}
       <div className="bg-white rounded-b-2xl shadow-sm p-4 pb-8 min-h-[400px]">
-        {/* 曜日ヘッダー */}
         <div className="grid grid-cols-7 mb-4 text-center">
           {['日', '月', '火', '水', '木', '金', '土'].map((day, i) => (
             <div key={day} className={`text-xs font-bold ${i === 0 ? 'text-red-400' : i === 6 ? 'text-blue-400' : 'text-gray-400'}`}>
@@ -115,11 +148,9 @@ export default function HistoryPage() {
           ))}
         </div>
 
-        {/* 日付グリッド */}
         <div className="grid grid-cols-7 gap-2">
           {calendarDays.map((date, i) => {
             if (!date) return <div key={i}></div>;
-            
             const log = getLogForDate(date);
             const isToday = new Date().toDateString() === date.toDateString();
 
@@ -137,20 +168,10 @@ export default function HistoryPage() {
                 <span className={`text-xs font-bold ${log ? 'text-gray-700' : ''}`}>
                   {date.getDate()}
                 </span>
-                
-                {/* ログがある場合の表示 */}
                 {log && (
                   <>
-                    <div 
-                      className="mt-1 text-xl"
-                      style={{ color: log.itemColor || '#666' }}
-                    >
-                      🧥
-                    </div>
-                    {/* 評価済みバッジ */}
-                    {log.rating && (
-                      <div className="absolute bottom-1 right-1 w-2 h-2 rounded-full bg-green-500"></div>
-                    )}
+                    <div className="mt-1 text-xl" style={{ color: log.itemColor || '#666' }}>🧥</div>
+                    {log.rating && <div className="absolute bottom-1 right-1 w-2 h-2 rounded-full bg-green-500"></div>}
                   </>
                 )}
               </button>
@@ -159,12 +180,11 @@ export default function HistoryPage() {
         </div>
       </div>
 
-      {/* 詳細モーダル（ログ選択時に表示） */}
+      {/* 詳細モーダル */}
       {selectedLog && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 backdrop-blur-sm p-4">
           <div className="bg-white w-full max-w-md rounded-3xl p-6 shadow-2xl animate-slide-up max-h-[90vh] overflow-y-auto">
             
-            {/* モーダルヘッダー */}
             <div className="flex justify-between items-center mb-6">
               <div>
                 <p className="text-sm text-gray-400 font-bold flex items-center gap-2">
@@ -172,15 +192,11 @@ export default function HistoryPage() {
                 </p>
                 <h3 className="text-xl font-bold text-gray-800">{selectedLog.itemName}</h3>
               </div>
-              <button 
-                onClick={() => setSelectedLog(null)}
-                className="p-2 bg-gray-100 rounded-full hover:bg-gray-200"
-              >
+              <button onClick={() => setSelectedLog(null)} className="p-2 bg-gray-100 rounded-full hover:bg-gray-200">
                 <X size={20} />
               </button>
             </div>
 
-            {/* 気温情報 */}
             <div className="flex gap-4 mb-6">
               <div className="flex-1 bg-blue-50 p-4 rounded-xl flex items-center justify-between">
                 <span className="text-xs text-blue-400 font-bold flex items-center gap-1"><ArrowDown size={12}/> 最低</span>
@@ -192,7 +208,17 @@ export default function HistoryPage() {
               </div>
             </div>
 
-            {/* 評価エリア */}
+            {/* 折れ線グラフ表示エリア */}
+            {selectedLog.chartData && selectedLog.chartData.length > 0 && (
+              <div className="bg-white border border-gray-100 p-4 rounded-xl mb-6 shadow-sm">
+                <div className="flex items-center gap-2 mb-2">
+                  <Thermometer size={14} className="text-gray-400"/>
+                  <span className="text-xs font-bold text-gray-500">当日の気温推移</span>
+                </div>
+                {renderGraph(selectedLog.chartData, selectedLog.minTemp, selectedLog.maxTemp)}
+              </div>
+            )}
+
             <div className="mb-8">
               <p className="text-xs text-center text-gray-400 mb-3 font-bold">この日の着心地は？</p>
               <div className="flex justify-center gap-3">
@@ -207,42 +233,6 @@ export default function HistoryPage() {
                 </button>
               </div>
             </div>
-
-            {/* グラフ（データがある場合のみ簡易表示） */}
-            {selectedLog.chartData && (
-              <div className="bg-gray-50 p-4 rounded-xl">
-                <div className="flex items-center gap-2 mb-2">
-                  <Thermometer size={14} className="text-gray-400"/>
-                  <span className="text-xs font-bold text-gray-500">当日の気温推移</span>
-                </div>
-                {/* 簡易的なグラフ表示（ResultPageのロジック簡易版） */}
-                <div className="h-24 w-full flex items-end gap-1">
-                  {selectedLog.chartData.map((d: any, i: number) => {
-                    // 高さ計算
-                    const min = selectedLog.minTemp;
-                    const max = selectedLog.maxTemp;
-                    const h = ((d.temp - min) / (max - min || 1)) * 60 + 20; // 20px~80px
-                    return (
-                      <div key={i} className="flex-1 flex flex-col items-center group relative">
-                        {/* ツールチップ的な表示 */}
-                        <div className="absolute -top-6 opacity-0 group-hover:opacity-100 bg-black text-white text-[10px] px-1 rounded transition-opacity pointer-events-none">
-                          {d.temp}℃
-                        </div>
-                        <div 
-                          className={`w-full rounded-t ${d.temp === min ? 'bg-blue-400' : d.temp === max ? 'bg-red-400' : 'bg-gray-300'}`}
-                          style={{ height: `${h}%` }}
-                        ></div>
-                      </div>
-                    )
-                  })}
-                </div>
-                <div className="flex justify-between text-[10px] text-gray-400 mt-1">
-                  <span>{selectedLog.conditions?.startTime}</span>
-                  <span>{selectedLog.conditions?.endTime}</span>
-                </div>
-              </div>
-            )}
-            
           </div>
         </div>
       )}
