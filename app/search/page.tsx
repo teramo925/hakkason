@@ -1,24 +1,24 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, MapPin, Search, Clock, Car, Train, Footprints, Plane } from 'lucide-react';
+import { ArrowLeft, MapPin, Search, Clock, Car, Train, Footprints, Plane, ThermometerSun, User } from 'lucide-react';
 import AnalogClockSlider from '../../components/AnalogClockSlider';
 
 // ==========================================
 // データ・ロジック定義
 // ==========================================
 
-const CATEGORY_DATA: Record<number, { temp: number; name: string }> = {
-  1: { temp: 3, name: '真冬用ダウン' },
-  2: { temp: 7, name: '厚手ブルゾン' },
-  3: { temp: 12, name: '防風ジャケット' },
-  4: { temp: 16, name: '薄手ブルゾン' },
-  5: { temp: 18, name: 'ジャケット' },
-  6: { temp: 7, name: '冬用コート' },
-  7: { temp: 12, name: '春秋コート' },
-  8: { temp: 22, name: 'カーディガン' },
+const CATEGORY_DATA: Record<number, { min: number; max: number; name: string; rainStrong: boolean }> = {
+  1: { min: -10, max: 8,  name: '真冬用ダウン', rainStrong: false },
+  2: { min: 5,   max: 12, name: '厚手ブルゾン', rainStrong: true },
+  3: { min: 8,   max: 15, name: '防風ジャケット', rainStrong: true },
+  4: { min: 12,  max: 20, name: '薄手ブルゾン', rainStrong: true },
+  5: { min: 15,  max: 22, name: 'ジャケット', rainStrong: false },
+  6: { min: 2,   max: 10, name: '冬用コート', rainStrong: false },
+  7: { min: 10,  max: 18, name: '春秋コート', rainStrong: true },
+  8: { min: 18,  max: 25, name: 'カーディガン', rainStrong: false },
 };
 
 type Item = {
@@ -31,29 +31,105 @@ type Item = {
   color?: string;
 };
 
-function getBestOuter(items: Item[], minTemp: number, windSpeed: number, transport: string) {
+type Log = {
+  id: string;
+  itemName: string;
+  minTemp: number;
+  rating: 'good' | 'ok' | 'bad' | null;
+};
+
+type UserType = 'cold_sensitive' | 'normal' | 'heat_sensitive';
+
+function getBestOuter(
+  items: Item[], 
+  minTemp: number, 
+  maxTemp: number, 
+  windSpeed: number, 
+  transport: string, 
+  weatherCode: number, 
+  logs: Log[],
+  userType: UserType
+) {
   if (items.length === 0) return null;
   let bestItem = items[0];
   let maxScore = -9999;
 
+  const isRainy = (weatherCode >= 51 && weatherCode <= 67) || (weatherCode >= 80 && weatherCode <= 99);
+  const isSnowy = (weatherCode >= 71 && weatherCode <= 77);
+  const isSunny = (weatherCode === 0 || weatherCode === 1);
+  const isBadWeather = isRainy || isSnowy;
+
+  const currentMonth = new Date().getMonth() + 1;
+  const isAutumnWinter = currentMonth >= 10 || currentMonth <= 2;
+
+  let effectiveTemp = minTemp;
+  effectiveTemp -= Math.max(0, windSpeed - 1);
+  if (isSunny) effectiveTemp += 2;
+  
+  if (userType === 'cold_sensitive') effectiveTemp -= 3;
+  if (userType === 'heat_sensitive') effectiveTemp += 3;
+
+  if (isAutumnWinter) effectiveTemp -= 1;
+
   items.forEach((item) => {
-    const catData = CATEGORY_DATA[item.categoryId];
-    let target = catData ? catData.temp : 15;
-    if (item.thickness === 'thick') target -= 3;
-    if (item.thickness === 'thin') target += 5;
+    const cat = CATEGORY_DATA[item.categoryId];
+    let rangeMin = cat ? cat.min : 15;
+    let rangeMax = cat ? cat.max : 20;
 
-    let score = 100 - Math.abs(target - minTemp) * 5;
+    if (item.thickness === 'thick') { rangeMin -= 3; rangeMax -= 2; }
+    if (item.thickness === 'thin')  { rangeMin += 3; rangeMax += 3; }
 
-    if (windSpeed >= 5 && item.windproof === 'bad') score += 15;
-    if (windSpeed >= 5 && item.windproof === 'good') score -= 10;
+    let baseScore = 100;
 
-    if (transport === 'walk' && item.weight === 'light') score += 10;
-    if (transport === 'walk' && item.weight === 'heavy') score -= 5;
-    if (transport === 'car' && [1, 2, 4].includes(item.categoryId)) score += 5; 
-    if (transport === 'car' && [6, 7].includes(item.categoryId)) score -= 5;
+    if (effectiveTemp >= rangeMin && effectiveTemp <= rangeMax) {
+      baseScore = 100;
+    } else if (effectiveTemp < rangeMin) {
+      baseScore = 100 - (rangeMin - effectiveTemp) * 15; 
+    } else {
+      baseScore = 100 - (effectiveTemp - rangeMax) * 8;
+    }
 
-    if (score > maxScore) {
-      maxScore = score;
+    if (maxTemp > rangeMax + 7) {
+      baseScore -= 20;
+    }
+
+    if (windSpeed >= 5) {
+      if (item.windproof === 'bad') baseScore += 20;
+      if (item.windproof === 'good') baseScore -= 15;
+    }
+
+    if (transport === 'walk') {
+      if (item.weight === 'light') baseScore += 10;
+      if (item.weight === 'heavy') baseScore -= 10;
+    }
+    if (transport === 'car') {
+      if ([1, 2, 4].includes(item.categoryId)) baseScore += 10; 
+      if ([6, 7].includes(item.categoryId)) baseScore -= 5;
+    }
+
+    if (isBadWeather) {
+      if (cat.rainStrong) baseScore += 15;
+      else baseScore -= 30;
+    }
+
+    let fbScore = 0;
+    let fbCount = 0;
+    logs.forEach(log => {
+      if (log.itemName === item.name && Math.abs(log.minTemp - minTemp) < 4) {
+        if (log.rating === 'good') fbScore += 100;
+        if (log.rating === 'ok')   fbScore += 70;
+        if (log.rating === 'bad')  fbScore += 0;
+        fbCount++;
+      }
+    });
+
+    let finalScore = baseScore;
+    if (fbCount > 0) {
+      finalScore = (baseScore * 0.5) + ((fbScore / fbCount) * 0.5);
+    }
+
+    if (finalScore > maxScore) {
+      maxScore = finalScore;
       bestItem = item;
     }
   });
@@ -61,12 +137,18 @@ function getBestOuter(items: Item[], minTemp: number, windSpeed: number, transpo
   return { item: bestItem, score: maxScore };
 }
 
-function getIdealCategory(minTemp: number) {
+function getIdealCategory(minTemp: number, userType: UserType) {
+  let targetTemp = minTemp;
+  if (userType === 'cold_sensitive') targetTemp -= 3;
+  if (userType === 'heat_sensitive') targetTemp += 3;
+
   let bestCatId = 8;
   let minDiff = 999;
+  
   Object.entries(CATEGORY_DATA).forEach(([idStr, data]) => {
     const id = parseInt(idStr);
-    const diff = Math.abs(data.temp - minTemp);
+    const mid = (data.min + data.max) / 2;
+    const diff = Math.abs(mid - targetTemp);
     if (diff < minDiff) {
       minDiff = diff;
       bestCatId = id;
@@ -88,6 +170,16 @@ export default function SearchPage() {
   const [transport, setTransport] = useState('train');
   const [searchMode, setSearchMode] = useState<'current' | 'travel'>('current');
   const [locationQuery, setLocationQuery] = useState('');
+  const [userType, setUserType] = useState<UserType>('normal');
+
+  // ▼▼▼ 追加：起動時に前回の設定を読み込む ▼▼▼
+  useEffect(() => {
+    const savedUserType = localStorage.getItem('user_type') as UserType;
+    if (savedUserType) {
+      setUserType(savedUserType);
+    }
+  }, []);
+  // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
   const handleSearch = async () => {
     setLoading(true);
@@ -110,30 +202,22 @@ export default function SearchPage() {
           setLoading(false);
           return;
         }
-        
-        // ▼▼▼ 修正点：OpenStreetMap (Nominatim) APIに変更 ▼▼▼
-        // これで「ディズニーランド」「清水寺」などの施設名もヒットします！
         const geoRes = await fetch(
           `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(locationQuery)}`
         );
         const geoData = await geoRes.json();
-
         if (!geoData || geoData.length === 0) {
-          alert('場所が見つかりませんでした。別の言い方で試してください。');
+          alert('場所が見つかりませんでした。');
           setLoading(false);
           return;
         }
-
-        // OpenStreetMapは文字列で座標を返すので数値に変換
         lat = parseFloat(geoData[0].lat);
         lon = parseFloat(geoData[0].lon);
-        // 名前が長すぎる場合があるので、入力した名前を使うか、短く表示
         locationName = locationQuery; 
-        // ▲▲▲ ここまで変更 ▲▲▲
       }
 
       const res = await fetch(
-        `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=temperature_2m&current_weather=true&timezone=auto`
+        `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=temperature_2m,weathercode&current_weather=true&timezone=auto`
       );
       const data = await res.json();
 
@@ -152,21 +236,19 @@ export default function SearchPage() {
       const minTemp = Math.min(...targetTemps);
       const maxTemp = Math.max(...targetTemps);
       const windSpeed = data.current_weather.windspeed;
+      const weatherCode = data.current_weather.weathercode;
 
       const items = JSON.parse(localStorage.getItem('my_items') || '[]');
-      
-      // 服がない場合のガード（エラー回避）
-      if (items.length === 0) {
-        // 服がなくても動くように、空配列のまま処理を進める（下で推奨ロジックが働く）
-      }
+      const logs = JSON.parse(localStorage.getItem('my_logs') || '[]');
 
       let suggestion = null;
       if (items.length > 0) {
-        suggestion = getBestOuter(items, minTemp, windSpeed, transport);
+        suggestion = getBestOuter(items, minTemp, maxTemp, windSpeed, transport, weatherCode, logs, userType);
       } 
       
       if (!suggestion || suggestion.score < 50) {
-        const idealId = getIdealCategory(minTemp);
+        const effectiveMin = minTemp - Math.max(0, windSpeed - 1);
+        const idealId = getIdealCategory(effectiveMin, userType);
         const idealName = CATEGORY_DATA[idealId].name;
         
         suggestion = {
@@ -187,9 +269,9 @@ export default function SearchPage() {
 
       const resultData = {
         suggestion,
-        weather: { minTemp, maxTemp, windSpeed },
+        weather: { minTemp, maxTemp, windSpeed, weatherCode },
         chartData,
-        conditions: { startTime, endTime, transport, locationName }
+        conditions: { startTime, endTime, transport, locationName, userType }
       };
 
       sessionStorage.setItem('search_result', JSON.stringify(resultData));
@@ -197,7 +279,7 @@ export default function SearchPage() {
 
     } catch (error) {
       console.error(error);
-      alert('通信エラーが発生しました。しばらく待ってからお試しください。');
+      alert('エラーが発生しました。');
       setLoading(false);
     }
   };
@@ -229,7 +311,6 @@ export default function SearchPage() {
           {searchMode === 'travel' && (
             <div className="animate-fade-in">
               <input type="text" placeholder="行き先を入力 (例: USJ、金閣寺)" value={locationQuery} onChange={(e) => setLocationQuery(e.target.value)} className="w-full p-4 bg-gray-50 rounded-xl border border-gray-200 focus:ring-2 focus:ring-orange-200 focus:border-orange-400 outline-none transition-all font-bold text-gray-800 placeholder-gray-400"/>
-              <p className="text-xs text-gray-400 mt-2 ml-1">※観光地名や駅名でも検索できます</p>
             </div>
           )}
         </div>
@@ -240,6 +321,36 @@ export default function SearchPage() {
             <Clock size={18} /> 外出時間を設定
           </label>
           <AnalogClockSlider startTime={startTime} endTime={endTime} onChange={(newStart, newEnd) => { setStartTime(newStart); setEndTime(newEnd); }} />
+        </div>
+
+        {/* 体質選択 */}
+        <div>
+          <label className="block text-sm font-bold text-gray-500 mb-2 flex items-center gap-2">
+            <User size={16} /> 体質・好み
+          </label>
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              { id: 'cold_sensitive', label: '寒がり', icon: '🥶' },
+              { id: 'normal', label: '普通', icon: '🙂' },
+              { id: 'heat_sensitive', label: '暑がり', icon: '🥵' },
+            ].map((type) => (
+              <button
+                key={type.id}
+                onClick={() => {
+                  setUserType(type.id as UserType);
+                  // ▼▼▼ ここで保存！ ▼▼▼
+                  localStorage.setItem('user_type', type.id);
+                }}
+                className={`py-3 rounded-lg flex flex-col items-center gap-1 text-xs font-bold border-2 transition-all
+                  ${userType === type.id 
+                    ? 'border-blue-500 bg-blue-50 text-blue-700' 
+                    : 'border-transparent bg-gray-50 text-gray-500'}`}
+              >
+                <span className="text-lg">{type.icon}</span>
+                {type.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* 移動手段 */}
