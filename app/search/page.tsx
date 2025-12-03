@@ -10,7 +10,6 @@ import AnalogClockSlider from '../../components/AnalogClockSlider';
 // データ・ロジック定義
 // ==========================================
 
-// カテゴリーごとの基準気温と名前（推奨用マスタデータ）
 const CATEGORY_DATA: Record<number, { temp: number; name: string }> = {
   1: { temp: 3, name: '真冬用ダウン' },
   2: { temp: 7, name: '厚手ブルゾン' },
@@ -32,25 +31,19 @@ type Item = {
   color?: string;
 };
 
-// ① 手持ちからベストを選ぶ関数
 function getBestOuter(items: Item[], minTemp: number, windSpeed: number, transport: string) {
   if (items.length === 0) return null;
   let bestItem = items[0];
   let maxScore = -9999;
 
   items.forEach((item) => {
-    // マスタデータから基準気温を取得（なければ15℃）
     const catData = CATEGORY_DATA[item.categoryId];
     let target = catData ? catData.temp : 15;
-    
-    // スペック補正
     if (item.thickness === 'thick') target -= 3;
     if (item.thickness === 'thin') target += 5;
 
-    // 基本スコア計算
     let score = 100 - Math.abs(target - minTemp) * 5;
 
-    // 状況補正
     if (windSpeed >= 5 && item.windproof === 'bad') score += 15;
     if (windSpeed >= 5 && item.windproof === 'good') score -= 10;
 
@@ -68,12 +61,9 @@ function getBestOuter(items: Item[], minTemp: number, windSpeed: number, transpo
   return { item: bestItem, score: maxScore };
 }
 
-// ② 【追加】気温から「理想のカテゴリー」を見つける関数
 function getIdealCategory(minTemp: number) {
-  let bestCatId = 8; // デフォルトはカーディガン
+  let bestCatId = 8;
   let minDiff = 999;
-
-  // 全カテゴリーの中で、一番気温が近いものを探す
   Object.entries(CATEGORY_DATA).forEach(([idStr, data]) => {
     const id = parseInt(idStr);
     const diff = Math.abs(data.temp - minTemp);
@@ -82,7 +72,6 @@ function getIdealCategory(minTemp: number) {
       bestCatId = id;
     }
   });
-
   return bestCatId;
 }
 
@@ -122,21 +111,25 @@ export default function SearchPage() {
           return;
         }
         
-        // 日本語対応のためのエンコード処理
+        // ▼▼▼ 修正点：OpenStreetMap (Nominatim) APIに変更 ▼▼▼
+        // これで「ディズニーランド」「清水寺」などの施設名もヒットします！
         const geoRes = await fetch(
-          `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(locationQuery)}&count=1&language=ja&format=json`
+          `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(locationQuery)}`
         );
         const geoData = await geoRes.json();
 
-        if (!geoData.results || geoData.results.length === 0) {
-          alert('場所が見つかりませんでした。「東京」「大阪」などの都市名で試してください。');
+        if (!geoData || geoData.length === 0) {
+          alert('場所が見つかりませんでした。別の言い方で試してください。');
           setLoading(false);
           return;
         }
 
-        lat = geoData.results[0].latitude;
-        lon = geoData.results[0].longitude;
-        locationName = geoData.results[0].name;
+        // OpenStreetMapは文字列で座標を返すので数値に変換
+        lat = parseFloat(geoData[0].lat);
+        lon = parseFloat(geoData[0].lon);
+        // 名前が長すぎる場合があるので、入力した名前を使うか、短く表示
+        locationName = locationQuery; 
+        // ▲▲▲ ここまで変更 ▲▲▲
       }
 
       const res = await fetch(
@@ -160,38 +153,37 @@ export default function SearchPage() {
       const maxTemp = Math.max(...targetTemps);
       const windSpeed = data.current_weather.windspeed;
 
-      // ▼▼▼ 修正点：手持ちがない or 合わない場合のロジック ▼▼▼
       const items = JSON.parse(localStorage.getItem('my_items') || '[]');
-      let suggestion = null;
+      
+      // 服がない場合のガード（エラー回避）
+      if (items.length === 0) {
+        // 服がなくても動くように、空配列のまま処理を進める（下で推奨ロジックが働く）
+      }
 
-      // まず手持ちから探す
+      let suggestion = null;
       if (items.length > 0) {
         suggestion = getBestOuter(items, minTemp, windSpeed, transport);
       } 
       
-      // 「手持ちがない」または「ベストな服でも点数が低い（50点未満）」場合
-      // → AIが理想の服を提案する（手持ちの結果を上書き）
       if (!suggestion || suggestion.score < 50) {
         const idealId = getIdealCategory(minTemp);
         const idealName = CATEGORY_DATA[idealId].name;
         
-        // 架空のアイテムデータを作成
         suggestion = {
           item: {
             id: 'dummy',
-            name: `推奨: ${idealName}`, // 「推奨: 真冬用ダウン」のように表示
+            name: `推奨: ${idealName}`,
             categoryId: idealId,
             thickness: 'normal',
             weight: 'normal',
             windproof: 'normal',
-            color: '#cccccc', // グレーで表示
+            color: '#cccccc',
             image: null,
-            isRecommendation: true // ※これは「持っていない」印として使えます
+            isRecommendation: true
           },
-          score: 100 // 推奨なので満点扱い
+          score: 100
         };
       }
-      // ▲▲▲ ここまで ▲▲▲
 
       const resultData = {
         suggestion,
@@ -205,7 +197,7 @@ export default function SearchPage() {
 
     } catch (error) {
       console.error(error);
-      alert('エラーが発生しました。通信環境を確認してください。');
+      alert('通信エラーが発生しました。しばらく待ってからお試しください。');
       setLoading(false);
     }
   };
@@ -236,8 +228,8 @@ export default function SearchPage() {
           </div>
           {searchMode === 'travel' && (
             <div className="animate-fade-in">
-              <input type="text" placeholder="行き先を入力 (例: 京都、札幌)" value={locationQuery} onChange={(e) => setLocationQuery(e.target.value)} className="w-full p-4 bg-gray-50 rounded-xl border border-gray-200 focus:ring-2 focus:ring-orange-200 focus:border-orange-400 outline-none transition-all font-bold text-gray-800 placeholder-gray-400"/>
-              <p className="text-xs text-gray-400 mt-2 ml-1">※県名や主要な都市名を入力してください</p>
+              <input type="text" placeholder="行き先を入力 (例: USJ、金閣寺)" value={locationQuery} onChange={(e) => setLocationQuery(e.target.value)} className="w-full p-4 bg-gray-50 rounded-xl border border-gray-200 focus:ring-2 focus:ring-orange-200 focus:border-orange-400 outline-none transition-all font-bold text-gray-800 placeholder-gray-400"/>
+              <p className="text-xs text-gray-400 mt-2 ml-1">※観光地名や駅名でも検索できます</p>
             </div>
           )}
         </div>
