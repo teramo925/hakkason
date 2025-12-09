@@ -11,9 +11,7 @@ import AnalogClockSlider from '../../components/AnalogClockSlider';
 // ==========================================
 
 const CATEGORY_DATA: Record<number, { min: number; max: number; name: string; rainStrong: boolean }> = {
-  // 0: アウターなし
   0: { min: 25, max: 45, name: 'アウターなし', rainStrong: true },
-  
   1: { min: -30, max: 5,  name: '真冬用ダウン', rainStrong: false },
   2: { min: 3,   max: 11, name: '厚手ブルゾン', rainStrong: true },
   3: { min: 8,   max: 16, name: '防風ジャケット', rainStrong: true },
@@ -24,7 +22,6 @@ const CATEGORY_DATA: Record<number, { min: number; max: number; name: string; ra
   8: { min: 18,  max: 26, name: 'カーディガン', rainStrong: false },
 };
 
-// ▼▼▼ 修正：isRecommendation を追加 ▼▼▼
 type Item = {
   id: string;
   categoryId: number;
@@ -36,7 +33,7 @@ type Item = {
   warmth?: number;
   hasHood?: boolean;
   image?: string; 
-  isRecommendation?: boolean; // ★これが必要でした！
+  isRecommendation?: boolean;
 };
 
 type Log = {
@@ -60,7 +57,6 @@ function getBestOuter(
   logs: Log[],
   userType: UserType
 ) {
-  // 仮想アイテム「アウターなし」を作成
   const noOuterItem: Item = {
     id: 'no_outer_virtual',
     categoryId: 0,
@@ -123,7 +119,6 @@ function getBestOuter(
         const diff = effectiveTemp - rangeMax;
         totalPenalty += (diff * diff) * 2.0; 
         
-        // 30℃超えで厚手アウターなら即死級ペナルティ
         if (temp > 30 && [1, 2, 6].includes(item.categoryId)) {
             totalPenalty += 5000; 
         }
@@ -187,7 +182,6 @@ function getBestOuter(
   let adviceText = "一日中快適に過ごせそうです。";
   const advices = [];
   
-  // アドバイス分岐
   if (bestItem.categoryId === 0) {
     if (maxRawTemp >= 30) {
       adviceText = "猛暑日です。アウターは不要！熱中症に気をつけて。";
@@ -218,7 +212,7 @@ function getIdealCategory(minTemp: number, userType: UserType) {
   if (userType === 'cold_sensitive') targetTemp -= 3;
   if (userType === 'heat_sensitive') targetTemp += 3;
   
-  if (targetTemp >= 25) return 0; // アウターなし
+  if (targetTemp >= 25) return 0; 
 
   let bestCatId = 8;
   let minDiff = 999;
@@ -243,8 +237,17 @@ export default function SearchPage() {
   const [userType, setUserType] = useState<UserType>('normal');
 
   useEffect(() => {
+    // 1. 体質設定の読み込み
     const savedUserType = localStorage.getItem('user_type') as UserType;
     if (savedUserType) setUserType(savedUserType);
+
+    // ▼▼▼ 2. 現在時刻の設定（ここが追加ポイント！） ▼▼▼
+    const now = new Date();
+    const currentHour = now.getHours();
+    // 「今」をスタート時間にする（0埋めして 09:00 形式に）
+    const formattedStart = `${currentHour.toString().padStart(2, '0')}:00`;
+    setStartTime(formattedStart);
+    // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
   }, []);
 
   const handleSearch = async () => {
@@ -284,7 +287,6 @@ export default function SearchPage() {
 
       let suggestion = getBestOuter(items, targetTemps, windSpeed, avgHumidity, transport, weatherCode, startHour, endHour, logs, userType);
       
-      // スコア不足なら推奨を表示
       if (!suggestion || suggestion.score < 60) {
         const effectiveMin = minTemp - Math.max(0, windSpeed - 1);
         const idealId = getIdealCategory(effectiveMin, userType);
@@ -298,7 +300,7 @@ export default function SearchPage() {
             id: 'dummy', name: `推奨: ${idealName}`, categoryId: idealId, thickness: 'normal',
             weight: 'normal', windproof: 'normal', color: '#cccccc', 
             image: undefined,
-            isRecommendation: true // エラー解消
+            isRecommendation: true
           },
           score: 100,
           inner: maxTemp >= 28 ? "半袖 / ノースリーブ" : "気温に合わせたインナー", 
