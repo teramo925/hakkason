@@ -168,10 +168,32 @@ export default function HistoryPage() {
                 <span className={`text-xs font-bold ${log ? 'text-gray-700' : ''}`}>
                   {date.getDate()}
                 </span>
+                
                 {log && (
                   <>
-                    <div className="mt-1 text-xl" style={{ color: log.itemColor || '#666' }}>🧥</div>
-                    {log.rating && <div className="absolute bottom-1 right-1 w-2 h-2 rounded-full bg-green-500"></div>}
+                    <div 
+                      className="mt-1 text-xl"
+                      style={{ color: log.itemColor || '#666' }}
+                    >
+                      🧥
+                    </div>
+                    {/* ▼▼▼ 修正：評価結果をアイコンで表示 ▼▼▼ */}
+                    {log.rating === 'good' && (
+                      <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-white rounded-full shadow-sm flex items-center justify-center text-xs border border-orange-100" title="暑かった">
+                        🥵
+                      </div>
+                    )}
+                    {log.rating === 'ok' && (
+                      <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-white rounded-full shadow-sm flex items-center justify-center text-xs border border-green-100" title="快適">
+                        🙂
+                      </div>
+                    )}
+                    {log.rating === 'bad' && (
+                      <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-white rounded-full shadow-sm flex items-center justify-center text-xs border border-blue-100" title="寒かった">
+                        🥶
+                      </div>
+                    )}
+                    {/* ▲▲▲ ここまで ▲▲▲ */}
                   </>
                 )}
               </button>
