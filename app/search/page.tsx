@@ -11,17 +11,20 @@ import AnalogClockSlider from '../../components/AnalogClockSlider';
 // ==========================================
 
 const CATEGORY_DATA: Record<number, { min: number; max: number; name: string; rainStrong: boolean }> = {
+  // 0: アウターなし
+  0: { min: 25, max: 45, name: 'アウターなし', rainStrong: true },
+  
   1: { min: -30, max: 5,  name: '真冬用ダウン', rainStrong: false },
   2: { min: 3,   max: 11, name: '厚手ブルゾン', rainStrong: true },
   3: { min: 8,   max: 16, name: '防風ジャケット', rainStrong: true },
-  4: { min: 14,  max: 22, name: '薄手ブルゾン', rainStrong: true },
-  5: { min: 16,  max: 24, name: 'ジャケット', rainStrong: false },
+  4: { min: 14,  max: 21, name: '薄手ブルゾン', rainStrong: true },
+  5: { min: 16,  max: 23, name: 'ジャケット', rainStrong: false },
   6: { min: 4,   max: 12, name: '冬用コート', rainStrong: false },
-  7: { min: 11,  max: 19, name: '春秋コート', rainStrong: true },
-  // ▼ カーディガンの上限を上げて、夏の冷房対策として選ばれやすくする
-  8: { min: 18,  max: 32, name: 'カーディガン', rainStrong: false }, 
+  7: { min: 11,  max: 18, name: '春秋コート', rainStrong: true },
+  8: { min: 18,  max: 26, name: 'カーディガン', rainStrong: false },
 };
 
+// ▼▼▼ 修正：isRecommendation を追加 ▼▼▼
 type Item = {
   id: string;
   categoryId: number;
@@ -32,6 +35,8 @@ type Item = {
   color?: string;
   warmth?: number;
   hasHood?: boolean;
+  image?: string; 
+  isRecommendation?: boolean; // ★これが必要でした！
 };
 
 type Log = {
@@ -55,11 +60,26 @@ function getBestOuter(
   logs: Log[],
   userType: UserType
 ) {
-  if (items.length === 0) return null;
-  let bestItem = items[0];
-  let minTotalPenalty = 99999999; // 初期値を大きく
+  // 仮想アイテム「アウターなし」を作成
+  const noOuterItem: Item = {
+    id: 'no_outer_virtual',
+    categoryId: 0,
+    name: 'アウターなし (シャツのみ)',
+    thickness: 'thin',
+    weight: 'light',
+    windproof: 'good',
+    color: '#ffffff',
+    warmth: 1,
+    hasHood: false,
+    image: undefined,
+    isRecommendation: true
+  };
+  
+  const candidates = [...items, noOuterItem];
 
-  // 環境定数
+  let bestItem = candidates[0];
+  let minTotalPenalty = 99999999;
+
   const isRainy = (weatherCode >= 51 && weatherCode <= 67) || (weatherCode >= 80 && weatherCode <= 99);
   const isSnowy = (weatherCode >= 71 && weatherCode <= 77);
   const isSunny = (weatherCode === 0 || weatherCode === 1);
@@ -67,7 +87,7 @@ function getBestOuter(
   const currentMonth = new Date().getMonth() + 1;
   const isAutumnWinter = currentMonth >= 10 || currentMonth <= 2;
 
-  items.forEach((item) => {
+  candidates.forEach((item) => {
     const cat = CATEGORY_DATA[item.categoryId];
     let rangeMin = cat ? cat.min : 15;
     let rangeMax = cat ? cat.max : 20;
@@ -96,26 +116,20 @@ function getBestOuter(
       if (userType === 'heat_sensitive') effectiveTemp += 3;
       if (isAutumnWinter) effectiveTemp -= 1;
 
-      // ★★★ 修正ポイント：ペナルティ計算 ★★★
       if (effectiveTemp < rangeMin) {
-        // 寒すぎる：2乗で大減点
         const diff = rangeMin - effectiveTemp;
         totalPenalty += (diff * diff) * 3.0; 
       } else if (effectiveTemp > rangeMax) {
-        // 暑すぎる：こちらも2乗に変更して厳しく減点！
         const diff = effectiveTemp - rangeMax;
-        // 旧: totalPenalty += diff * 1.0; 
-        // 新: 暑さも許容しない
         totalPenalty += (diff * diff) * 2.0; 
         
-        // 30℃超えで厚手アウターなら即死級のペナルティ
+        // 30℃超えで厚手アウターなら即死級ペナルティ
         if (temp > 30 && [1, 2, 6].includes(item.categoryId)) {
             totalPenalty += 5000; 
         }
       }
     });
 
-    // 状況補正
     if (windSpeed >= 5) {
       if (item.windproof === 'bad') totalPenalty -= 20;
       if (item.windproof === 'good') totalPenalty += 40;
@@ -146,9 +160,8 @@ function getBestOuter(
     }
   });
 
-  // --- インナー＆アドバイス ---
   const minRawTemp = Math.min(...hourlyTemps);
-  const maxRawTemp = Math.max(...hourlyTemps); // 最高気温
+  const maxRawTemp = Math.max(...hourlyTemps);
   
   let minEffective = minRawTemp - Math.max(0, windSpeed - 1);
   if (isSunny) minEffective += 2;
@@ -164,7 +177,6 @@ function getBestOuter(
   const innerJudgeTemp = minEffective + outerBonus;
 
   let innerSuggestion = "Tシャツ / カットソー";
-  // 30℃超え対応
   if (maxRawTemp >= 30) innerSuggestion = "半袖Tシャツ / ノースリーブ";
   else if (innerJudgeTemp < 3) innerSuggestion = "ヒートテック + 厚手ニット";
   else if (innerJudgeTemp < 8) innerSuggestion = "ニット / スウェット";
@@ -175,24 +187,30 @@ function getBestOuter(
   let adviceText = "一日中快適に過ごせそうです。";
   const advices = [];
   
-  // 猛暑対応メッセージ
-  if (maxRawTemp >= 30) {
-    advices.push("猛暑日です！屋外ではアウターは不要です。熱中症に警戒を。");
-  } else if (maxRawTemp >= 25) {
-    advices.push("日中は半袖でも過ごせる暑さです。アウターは冷房対策や夜用として。");
-  } else if (outerBonus >= 6 && maxRawTemp > 13) {
-    advices.push("アウターが暖かいので、インナーは薄めでOK。");
-  } else if (minEffective < 5 && outerBonus < 3) {
-    advices.push("アウターだけでは寒いので、重ね着で防寒を。");
+  // アドバイス分岐
+  if (bestItem.categoryId === 0) {
+    if (maxRawTemp >= 30) {
+      adviceText = "猛暑日です。アウターは不要！熱中症に気をつけて。";
+    } else {
+      adviceText = "今日は暖かいので、アウターなしで快適に過ごせそうです。";
+    }
+  } else {
+    if (maxRawTemp >= 25) advices.push("日中は半袖でも過ごせる暑さです。アウターは冷房対策や夜用として。");
+    else if (outerBonus >= 6 && maxRawTemp > 13) advices.push("アウターが暖かいので、インナーは薄めでOK。");
+    else if (minEffective < 5 && outerBonus < 3) advices.push("アウターだけでは寒いので、重ね着で防寒を。");
+
+    if (isBadWeather && !bestItem.hasHood) advices.push("雨予報です。傘を忘れずに。");
+    if (windSpeed >= 5) advices.push("風が強いので体感は寒いです。");
+    if (Math.max(...hourlyTemps) - Math.min(...hourlyTemps) > 10) advices.push("寒暖差が激しいので調整しやすい服装で。");
+    const hasNight = startHour >= 18 || endHour >= 18 || startHour <= 5;
+    if (hasNight) advices.push("帰りは冷え込みます。");
+    
+    if (advices.length > 0) adviceText = advices.join(" ");
   }
 
-  if (isBadWeather && !bestItem.hasHood) advices.push("雨予報です。傘を忘れずに。");
-  
-  // スコア換算（ペナルティが大きいと0点になるように調整）
-  // 31.8℃でブルゾンならペナルティが数千いくので0点になり、推奨へ流れる
   const displayScore = Math.max(0, 100 - (minTotalPenalty / (hourlyTemps.length * 2)));
 
-  return { item: bestItem, score: Math.round(displayScore), inner: innerSuggestion, advice: advices.join(" ") || adviceText };
+  return { item: bestItem, score: Math.round(displayScore), inner: innerSuggestion, advice: adviceText };
 }
 
 function getIdealCategory(minTemp: number, userType: UserType) {
@@ -200,13 +218,13 @@ function getIdealCategory(minTemp: number, userType: UserType) {
   if (userType === 'cold_sensitive') targetTemp -= 3;
   if (userType === 'heat_sensitive') targetTemp += 3;
   
-  // 30℃以上なら強制的に一番薄いもの（カーディガン）を選ぶ
-  if (targetTemp >= 28) return 8;
+  if (targetTemp >= 25) return 0; // アウターなし
 
   let bestCatId = 8;
   let minDiff = 999;
   Object.entries(CATEGORY_DATA).forEach(([idStr, data]) => {
     const id = parseInt(idStr);
+    if (id === 0) return; 
     const mid = (data.min + data.max) / 2;
     const diff = Math.abs(mid - targetTemp);
     if (diff < minDiff) { minDiff = diff; bestCatId = id; }
@@ -264,12 +282,9 @@ export default function SearchPage() {
       const items = JSON.parse(localStorage.getItem('my_items') || '[]');
       const logs = JSON.parse(localStorage.getItem('my_logs') || '[]');
 
-      let suggestion = null;
-      if (items.length > 0) {
-        suggestion = getBestOuter(items, targetTemps, windSpeed, avgHumidity, transport, weatherCode, startHour, endHour, logs, userType);
-      }
+      let suggestion = getBestOuter(items, targetTemps, windSpeed, avgHumidity, transport, weatherCode, startHour, endHour, logs, userType);
       
-      // スコア不足（暑すぎる服しかない場合など）なら推奨を表示
+      // スコア不足なら推奨を表示
       if (!suggestion || suggestion.score < 60) {
         const effectiveMin = minTemp - Math.max(0, windSpeed - 1);
         const idealId = getIdealCategory(effectiveMin, userType);
@@ -281,7 +296,9 @@ export default function SearchPage() {
         suggestion = {
           item: {
             id: 'dummy', name: `推奨: ${idealName}`, categoryId: idealId, thickness: 'normal',
-            weight: 'normal', windproof: 'normal', color: '#cccccc', image: null, isRecommendation: true
+            weight: 'normal', windproof: 'normal', color: '#cccccc', 
+            image: undefined,
+            isRecommendation: true // エラー解消
           },
           score: 100,
           inner: maxTemp >= 28 ? "半袖 / ノースリーブ" : "気温に合わせたインナー", 
