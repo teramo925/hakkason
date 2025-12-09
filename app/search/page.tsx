@@ -10,39 +10,16 @@ import AnalogClockSlider from '../../components/AnalogClockSlider';
 // データ・ロジック定義
 // ==========================================
 
-// ▼▼▼ 修正：根拠に基づいたリアルな適温範囲（都市部仕様） ▼▼▼
 const CATEGORY_DATA: Record<number, { min: number; max: number; name: string; rainStrong: boolean }> = {
-  // 1. 真冬用ダウン: 【5℃以下】
-  // 根拠: 5℃を下回ると本格的な防寒が必要。逆に6℃以上で電車に乗ると蒸れる。
   1: { min: -30, max: 5,  name: '真冬用ダウン', rainStrong: false },
-  
-  // 2. 厚手ブルゾン: 【5℃〜10℃】
-  // 根拠: MA-1やボアなど。風を通さないので10℃以下で活躍。12℃超えると暑い。
   2: { min: 3,   max: 11, name: '厚手ブルゾン', rainStrong: true },
-  
-  // 6. 冬用コート: 【5℃〜11℃】
-  // 根拠: ウールコートなど。前が開くのでダウンより調整しやすいが、12℃超えると重く感じる。
-  6: { min: 4,   max: 12, name: '冬用コート', rainStrong: false },
-  
-  // 3. 防風ジャケット: 【10℃〜15℃】
-  // 根拠: レザーや厚手マンパ。北風が冷たい春・秋（10-15℃）に最適。
   3: { min: 8,   max: 16, name: '防風ジャケット', rainStrong: true },
-  
-  // 7. 春秋コート: 【12℃〜17℃】
-  // 根拠: トレンチなど。10℃以下だとインナーで工夫しないと寒い。18℃超えると邪魔。
-  7: { min: 11,  max: 18, name: '春秋コート', rainStrong: true },
-  
-  // 4. 薄手ブルゾン: 【15℃〜20℃】
-  // 根拠: ナイロンJKTなど。日中20℃近くまで上がる日の朝晩用。
-  4: { min: 14,  max: 21, name: '薄手ブルゾン', rainStrong: true },
-  
-  // 5. ジャケット: 【16℃〜22℃】
-  // 根拠: テーラードなど。15℃以下だと寒い。23℃超えるとシャツ1枚でいい。
-  5: { min: 16,  max: 23, name: 'ジャケット', rainStrong: false },
-  
-  // 8. カーディガン: 【18℃〜25℃】
-  // 根拠: 20℃前後の「シャツだと肌寒い」時や、夏の冷房対策。
-  8: { min: 18,  max: 26, name: 'カーディガン', rainStrong: false },
+  4: { min: 14,  max: 22, name: '薄手ブルゾン', rainStrong: true },
+  5: { min: 16,  max: 24, name: 'ジャケット', rainStrong: false },
+  6: { min: 4,   max: 12, name: '冬用コート', rainStrong: false },
+  7: { min: 11,  max: 19, name: '春秋コート', rainStrong: true },
+  // ▼ カーディガンの上限を上げて、夏の冷房対策として選ばれやすくする
+  8: { min: 18,  max: 32, name: 'カーディガン', rainStrong: false }, 
 };
 
 type Item = {
@@ -80,8 +57,9 @@ function getBestOuter(
 ) {
   if (items.length === 0) return null;
   let bestItem = items[0];
-  let minTotalPenalty = 999999;
+  let minTotalPenalty = 99999999; // 初期値を大きく
 
+  // 環境定数
   const isRainy = (weatherCode >= 51 && weatherCode <= 67) || (weatherCode >= 80 && weatherCode <= 99);
   const isSnowy = (weatherCode >= 71 && weatherCode <= 77);
   const isSunny = (weatherCode === 0 || weatherCode === 1);
@@ -96,15 +74,12 @@ function getBestOuter(
 
     const itemWarmth = item.warmth || 3; 
     const diffLv = itemWarmth - 3; 
-    const minShift = diffLv * 3.0;
-    const maxShift = diffLv * 1.5;
-
-    rangeMin -= minShift;
-    rangeMax -= maxShift;
+    rangeMin -= diffLv * 3.0; 
+    rangeMax -= diffLv * 1.5;
 
     if (!item.warmth) {
         if (item.thickness === 'thick') { rangeMin -= 3; rangeMax -= 1; }
-        if (item.thickness === 'thin')  { rangeMin += 3; rangeMax += 2; }
+        if (item.thickness === 'thin')  { rangeMin += 3; rangeMax += 3; }
     }
 
     let totalPenalty = 0;
@@ -113,34 +88,39 @@ function getBestOuter(
       let effectiveTemp = temp;
       effectiveTemp -= Math.max(0, windSpeed - 1);
       
-      if (temp <= 12 && humidity >= 60) {
-        effectiveTemp -= (humidity - 60) / 10 * 0.4;
-      }
+      if (temp <= 12 && humidity >= 60) effectiveTemp -= (humidity - 60) / 10 * 0.4;
       
       if (transport === 'walk') effectiveTemp += 3.5;
       if (isSunny) effectiveTemp += 2.0;
-      
       if (userType === 'cold_sensitive') effectiveTemp -= 3;
       if (userType === 'heat_sensitive') effectiveTemp += 3;
       if (isAutumnWinter) effectiveTemp -= 1;
 
+      // ★★★ 修正ポイント：ペナルティ計算 ★★★
       if (effectiveTemp < rangeMin) {
+        // 寒すぎる：2乗で大減点
         const diff = rangeMin - effectiveTemp;
-        totalPenalty += (diff * diff) * 2.5; 
+        totalPenalty += (diff * diff) * 3.0; 
       } else if (effectiveTemp > rangeMax) {
+        // 暑すぎる：こちらも2乗に変更して厳しく減点！
         const diff = effectiveTemp - rangeMax;
-        let heatFactor = 1.2;
-        if (transport === 'train' || transport === 'walk') heatFactor = 2.5; 
-        totalPenalty += diff * heatFactor;
+        // 旧: totalPenalty += diff * 1.0; 
+        // 新: 暑さも許容しない
+        totalPenalty += (diff * diff) * 2.0; 
+        
+        // 30℃超えで厚手アウターなら即死級のペナルティ
+        if (temp > 30 && [1, 2, 6].includes(item.categoryId)) {
+            totalPenalty += 5000; 
+        }
       }
     });
 
+    // 状況補正
     if (windSpeed >= 5) {
       if (item.windproof === 'bad') totalPenalty -= 20;
       if (item.windproof === 'good') totalPenalty += 40;
       if (item.hasHood) totalPenalty -= 15;
     }
-
     if (transport === 'walk') {
       if (item.weight === 'heavy') totalPenalty += 50;
       if (item.weight === 'light') totalPenalty -= 25;
@@ -148,7 +128,6 @@ function getBestOuter(
     if (transport === 'car') {
       if ([1, 6, 7].includes(item.categoryId)) totalPenalty += 20;
     }
-
     if (isBadWeather) {
       if (!item.hasHood) totalPenalty += 50;
       if (!cat.rainStrong) totalPenalty += 90;
@@ -167,7 +146,10 @@ function getBestOuter(
     }
   });
 
+  // --- インナー＆アドバイス ---
   const minRawTemp = Math.min(...hourlyTemps);
+  const maxRawTemp = Math.max(...hourlyTemps); // 最高気温
+  
   let minEffective = minRawTemp - Math.max(0, windSpeed - 1);
   if (isSunny) minEffective += 2;
   if (userType === 'cold_sensitive') minEffective -= 3;
@@ -182,7 +164,9 @@ function getBestOuter(
   const innerJudgeTemp = minEffective + outerBonus;
 
   let innerSuggestion = "Tシャツ / カットソー";
-  if (innerJudgeTemp < 3) innerSuggestion = "ヒートテック + 厚手ニット";
+  // 30℃超え対応
+  if (maxRawTemp >= 30) innerSuggestion = "半袖Tシャツ / ノースリーブ";
+  else if (innerJudgeTemp < 3) innerSuggestion = "ヒートテック + 厚手ニット";
   else if (innerJudgeTemp < 8) innerSuggestion = "ニット / スウェット";
   else if (innerJudgeTemp < 15) innerSuggestion = "シャツ / 薄手ニット";
   else if (innerJudgeTemp < 22) innerSuggestion = "ロンT / シャツ";
@@ -191,29 +175,34 @@ function getBestOuter(
   let adviceText = "一日中快適に過ごせそうです。";
   const advices = [];
   
-  if (outerBonus >= 6 && Math.max(...hourlyTemps) > 13) advices.push("アウターが暖かいので、インナーは薄めでOK。");
-  else if (minEffective < 5 && outerBonus < 3) advices.push("アウターだけでは寒いので、重ね着で防寒を。");
+  // 猛暑対応メッセージ
+  if (maxRawTemp >= 30) {
+    advices.push("猛暑日です！屋外ではアウターは不要です。熱中症に警戒を。");
+  } else if (maxRawTemp >= 25) {
+    advices.push("日中は半袖でも過ごせる暑さです。アウターは冷房対策や夜用として。");
+  } else if (outerBonus >= 6 && maxRawTemp > 13) {
+    advices.push("アウターが暖かいので、インナーは薄めでOK。");
+  } else if (minEffective < 5 && outerBonus < 3) {
+    advices.push("アウターだけでは寒いので、重ね着で防寒を。");
+  }
 
   if (isBadWeather && !bestItem.hasHood) advices.push("雨予報です。傘を忘れずに。");
-  else if (isBadWeather && bestItem.hasHood) advices.push("フード付きなので多少の雨なら安心。");
   
-  if (windSpeed >= 5) advices.push("風が強いので体感は寒いです。");
-  if (Math.max(...hourlyTemps) - Math.min(...hourlyTemps) > 10) advices.push("寒暖差が激しいので脱ぎ着で調整を。");
-  
-  const hasNight = startHour >= 18 || endHour >= 18 || startHour <= 5;
-  if (hasNight) advices.push("帰りは冷え込みます。");
+  // スコア換算（ペナルティが大きいと0点になるように調整）
+  // 31.8℃でブルゾンならペナルティが数千いくので0点になり、推奨へ流れる
+  const displayScore = Math.max(0, 100 - (minTotalPenalty / (hourlyTemps.length * 2)));
 
-  if (advices.length > 0) adviceText = advices.join(" ");
-
-  const displayScore = Math.max(0, 100 - (minTotalPenalty / (hourlyTemps.length * 5)));
-
-  return { item: bestItem, score: Math.round(displayScore), inner: innerSuggestion, advice: adviceText };
+  return { item: bestItem, score: Math.round(displayScore), inner: innerSuggestion, advice: advices.join(" ") || adviceText };
 }
 
 function getIdealCategory(minTemp: number, userType: UserType) {
   let targetTemp = minTemp;
   if (userType === 'cold_sensitive') targetTemp -= 3;
   if (userType === 'heat_sensitive') targetTemp += 3;
+  
+  // 30℃以上なら強制的に一番薄いもの（カーディガン）を選ぶ
+  if (targetTemp >= 28) return 8;
+
   let bestCatId = 8;
   let minDiff = 999;
   Object.entries(CATEGORY_DATA).forEach(([idStr, data]) => {
@@ -280,17 +269,23 @@ export default function SearchPage() {
         suggestion = getBestOuter(items, targetTemps, windSpeed, avgHumidity, transport, weatherCode, startHour, endHour, logs, userType);
       }
       
-      if (!suggestion || suggestion.score < 75) {
+      // スコア不足（暑すぎる服しかない場合など）なら推奨を表示
+      if (!suggestion || suggestion.score < 60) {
         const effectiveMin = minTemp - Math.max(0, windSpeed - 1);
         const idealId = getIdealCategory(effectiveMin, userType);
         const idealName = CATEGORY_DATA[idealId].name;
+        
+        let advice = "手持ちに最適なものがありませんでした。";
+        if (maxTemp >= 30) advice = "猛暑です。アウターは不要ですが、冷房対策ならこちら。";
+
         suggestion = {
           item: {
             id: 'dummy', name: `推奨: ${idealName}`, categoryId: idealId, thickness: 'normal',
             weight: 'normal', windproof: 'normal', color: '#cccccc', image: null, isRecommendation: true
           },
           score: 100,
-          inner: "ニット / スウェット", advice: "手持ちに最適なものがありませんでした。"
+          inner: maxTemp >= 28 ? "半袖 / ノースリーブ" : "気温に合わせたインナー", 
+          advice: advice
         };
       }
 
